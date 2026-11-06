@@ -392,7 +392,8 @@
 
   // ---- clear list: hides rows on this iPad only; a row edited in the sheet comes back ----
   const HKEY = 'kd-hud-hidden:' + (demo ? 'demo' : sheetId);
-  const rowId = s => s.time + '|' + s.who + '|' + s.status;
+  // Stored scrambled so a cleared iPad keeps no initials, only enough to recognise an unchanged row.
+  const rowId = s => { let h = 5381; for (const c of s.time + '|' + s.who + '|' + s.status) h = (h * 33 + c.charCodeAt(0)) | 0; return h; };
   let hidden = (() => { try { return JSON.parse(localStorage.getItem(HKEY) || '[]'); } catch (_) { return []; } })();
   const saveHidden = () => { try { hidden.length ? localStorage.setItem(HKEY, JSON.stringify(hidden)) : localStorage.removeItem(HKEY); } catch (_) {} };
   const visible = slots => hidden.length ? slots.filter(s => !hidden.includes(rowId(s))) : slots;
