@@ -16,6 +16,7 @@
               kd-hud.html?demo=1                     labelled sample data, no network
   Data: Google's gviz endpoint, range A1:C60 of the "Sign-up" tab, polled every 10 s.
   Initials only ever appear; the Focus column is never requested.
+  Cover screen: hides all initials during the intake-form handover; press and hold to return.
   Session timer: tap NOW or NEXT, confirm, and a countdown runs (default 15 min, ?mins=N).
   The start time is kept in this browser (localStorage) so the timer survives handing the
   iPad over for the intake form, switching apps, or a reload. No form data ever passes
@@ -94,6 +95,13 @@
   dialog::backdrop { background: rgba(0,0,0,.6); }
   dialog h2 { font-size: clamp(22px, 4vw, 34px); margin-bottom: 18px; }
   dialog .actions { margin-top: 18px; }
+  #cover { position: fixed; inset: 0; background: #0E0D0C; color: var(--muted); display: none; z-index: 10;
+           flex-direction: column; align-items: center; justify-content: center; gap: 18px; text-align: center; padding: 24px; }
+  #cover.show { display: flex; }
+  #cover .kd { color: var(--now); font-weight: 900; font-size: clamp(32px, 7vw, 72px); letter-spacing: .04em; }
+  #cover .ring { width: 64px; height: 64px; border-radius: 50%; border: 4px solid #2A2623; position: relative; }
+  #cover.holding .ring { border-color: var(--now); transition: border-color 1.2s linear; }
+  .b-cover { background: transparent; color: var(--muted); border: 1px solid #3A3632; padding: 6px 12px; font-size: clamp(12px, 1.8vw, 15px); border-radius: 10px; }
   @media (orientation: landscape) and (max-height: 520px) {
     main { grid-template-rows: 1.6fr 1fr 1fr; gap: 8px; }
     body { gap: 8px; }
@@ -120,10 +128,12 @@
   </div>
 </section>
 <footer>
+  <button class="b-cover" id="b-cover">Cover screen</button>
   <div class="status" id="status"><span class="dot"></span><span id="status-text">Connecting…</span></div>
   <div class="stats" id="stats"></div>
 </footer>
 <div class="banner" id="banner"></div>
+<div id="cover"><div class="kd">KnuckleDown</div><div>Thanks, one moment.</div><div class="ring"></div><div style="font-size:13px;opacity:.6">Kenn: press and hold to return</div></div>
 <dialog id="dlg"><h2 id="dlg-title"></h2><p id="dlg-text" style="color:var(--muted)"></p>
   <div class="actions"><button class="b-ghost" id="dlg-no">Not yet</button><button class="b-primary" id="dlg-yes">Start</button></div></dialog>
 
@@ -251,6 +261,15 @@
       ? (sheetNow ? `Sheet still shows ${sheetNow} as Now. Update it when you can.` : `Sheet has nobody as Now. Set ${session.who} to Now.`)
       : '';
   }
+
+  // ---- cover screen for the handover -------------------------------------
+  // Hides everyone's initials while a client holds the iPad. A tap does nothing;
+  // press and hold for 1.2 s to return. The timer keeps running underneath.
+  const cover = $('cover'); let holdT = null;
+  $('b-cover').onclick = () => cover.classList.add('show');
+  const holdStart = e => { e.preventDefault(); cover.classList.add('holding'); holdT = setTimeout(() => cover.classList.remove('show', 'holding'), 1200); };
+  const holdEnd = () => { clearTimeout(holdT); cover.classList.remove('holding'); };
+  cover.addEventListener('pointerdown', holdStart); ['pointerup', 'pointerleave', 'pointercancel'].forEach(ev => cover.addEventListener(ev, holdEnd));
 
   // ---- render ------------------------------------------------------------
   function put(key, slot, emptyText) {
