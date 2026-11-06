@@ -24,8 +24,8 @@
   mark Now / Done there.
   Wellbeing form (only with &form=<tailnet host:port>&site=<slug> in the bookmark): opens the form
   from the Mac in a frame on top of this page. The frame is another origin, so the browser stops
-  this page reading any of it. The form says only "ready", "saved" or "next". "Screened" is kept
-  in this browser as slot + initials and is never sent anywhere.
+  this page reading any of it. The form says only "ready", "saved" (with initials) or "next".
+  "Screened" and walk-ins are kept in this browser as slot + initials and are never sent anywhere.
 -->
 <style>
   :root {
@@ -275,7 +275,7 @@
   function askOpen() {
     if ($('dlg').open) return;
     const d = new Date();
-    pending = { who: 'Walk-in', time: free ? free.time : pad(d.getHours()) + ':' + pad(d.getMinutes()) };
+    pending = { who: 'Walk-in', time: free ? free.time : clockLabel() };
     $('dlg-title').textContent = free ? `${free.time} is free` : 'Nobody on the list';
     $('dlg-text').textContent = 'For someone here now: open the wellbeing form or start the timer. Their initials can go in the sheet with Join the queue.';
     $('dlg-yes').hidden = !!session;
@@ -292,7 +292,7 @@
   $('c-now').onclick = () => { if (!lastQ) return; if (lastQ.now) ask(lastQ.now); else askOpen(); };
   $('c-next').onclick = () => { if (!lastQ) return; if (lastQ.next) ask(lastQ.next); else askOpen(); };
   $('c-then').onclick = () => { if (!lastQ) return; if (lastQ.then) { if (FORM) ask(lastQ.then); } else askOpen(); };
-  $('b-finish').onclick = () => { session = null; save(null); render(); };
+  $('b-finish').onclick = () => { if (session) dropWalkin(session.who); session = null; save(null); render(); };
   $('b-cancel').onclick = () => { session = null; save(null); render(); };
 
   function renderSessionNext(nx) {
@@ -373,7 +373,15 @@
   const EMBED = qs.get('embed') !== '0';
   const READY_MS = 8000, FLAG_HOLD_MS = 125000;
   const view = $('form-view'), slotEl = $('form-slot');
-  let frame = null, target = null, saved = false, readyT = null, wipeT = null;
+  let frame = null, target = null, saved = false, readyT = null, wipeT = null, afterSave = null;
+  const clockLabel = () => { const d = new Date(), h = d.getHours(); return (h % 12 || 12) + ':' + pad(d.getMinutes()) + (h < 12 ? ' am' : ' pm'); };
+  // Back on the board after a saved form: nobody in the chair, so this person's clock starts;
+  // otherwise they wait in NEXT, ticked, and the running clock is left alone.
+  function backOnBoard() {
+    const person = afterSave; afterSave = null;
+    if (person && !session) { session = { who: person.who, time: person.time, start: Date.now(), mins: MINS }; save(session); }
+    render();
+  }
 
   function removeFrame() {
     clearTimeout(readyT); clearTimeout(wipeT);
@@ -402,16 +410,21 @@
     if (ev === 'ready') { clearTimeout(readyT); $('form-fail').classList.remove('show'); }
     if (ev === 'saved') {
       saved = true;
-      if (target) setScreened(target, true);
-      $('form-msg').textContent = 'Saved. Kenn: turn to landscape for the board.';
+      const initials = typeof e.data.initials === 'string' && /^[A-Z\p{L}]{1,2}$/u.test(e.data.initials) ? e.data.initials : '';
+      const person = target && target.who === 'Walk-in' ? { who: initials || 'Walk-in', time: clockLabel(), local: true, status: '' } : target;
+      if (person) {
+        if (person.local) { dropWalkin(person.who); walkins.push(person); saveWalkins(); }
+        setScreened(person, true); afterSave = person;
+      }
+      $('form-msg').textContent = 'Saved. Kenn: tap Next client, or turn to landscape, for the board.';
       clearTimeout(wipeT); wipeT = setTimeout(removeFrame, FLAG_HOLD_MS);
       render();
     }
-    if (ev === 'next') { removeFrame(); view.classList.remove('show'); cover.classList.add('show'); render(); }
+    if (ev === 'next') { removeFrame(); view.classList.remove('show'); backOnBoard(); }
   });
   const landscape = matchMedia('(orientation: landscape)');
   landscape.addEventListener('change', () => {
-    if (landscape.matches && saved && view.classList.contains('show')) { view.classList.remove('show'); $('b-last').classList.add('show'); render(); }
+    if (landscape.matches && saved && view.classList.contains('show')) { view.classList.remove('show'); $('b-last').classList.add('show'); backOnBoard(); }
   });
   $('b-last').onclick = () => { if (frame) { view.classList.add('show'); $('b-last').classList.remove('show'); } };
   $('fail-retry').onclick = () => openForm(target);
@@ -419,7 +432,7 @@
   $('fail-back').onclick = () => { removeFrame(); closeForm(); };
   let formHoldT = null; const fh = $('form-hold');
   fh.addEventListener('pointerdown', e => { e.preventDefault(); fh.classList.add('holding');
-    formHoldT = setTimeout(() => { fh.classList.remove('holding'); if (saved) { view.classList.remove('show'); $('b-last').classList.add('show'); render(); } else closeForm(); }, 1200); });
+    formHoldT = setTimeout(() => { fh.classList.remove('holding'); if (saved) { view.classList.remove('show'); $('b-last').classList.add('show'); backOnBoard(); } else closeForm(); }, 1200); });
   ['pointerup', 'pointerleave', 'pointercancel'].forEach(ev => fh.addEventListener(ev, () => { clearTimeout(formHoldT); fh.classList.remove('holding'); }));
 
   // ---- joining: the HUD can't write to the sheet, so these open the sheet at the right cell ----
@@ -443,13 +456,20 @@
   let hidden = (() => { try { return JSON.parse(localStorage.getItem(HKEY) || '[]'); } catch (_) { return []; } })();
   const saveHidden = () => { try { hidden.length ? localStorage.setItem(HKEY, JSON.stringify(hidden)) : localStorage.removeItem(HKEY); } catch (_) {} };
   const visible = slots => hidden.length ? slots.filter(s => !hidden.includes(rowId(s))) : slots;
+  // Walk-ins finished their form but aren't in the sheet (the HUD can't write to it): this iPad only.
+  const WKEY = 'kd-hud-walkins:' + (demo ? 'demo' : sheetId) + ':' + today;
+  let walkins = (() => { try { return JSON.parse(localStorage.getItem(WKEY) || '[]'); } catch (_) { return []; } })();
+  const saveWalkins = () => { try { walkins.length ? localStorage.setItem(WKEY, JSON.stringify(walkins)) : localStorage.removeItem(WKEY); } catch (_) {} };
+  const dropWalkin = who => { walkins = walkins.filter(w => w.who !== who); saveWalkins(); };
+  const queueOf = slots => walkins.concat(visible(slots));
   $('b-clear').onclick = () => $('clr').showModal();
   $('clr-no').onclick = () => $('clr').close();
   $('clr-yes').onclick = () => {
     if (lastData) hidden = lastData.slots.filter(s => s.who || s.status).map(rowId);
     saveHidden();
     screened = []; try { localStorage.removeItem(SKEY); } catch (_) {}
-    session = null; save(null); removeFrame(); target = null;
+    session = null; save(null); removeFrame(); target = null; afterSave = null;
+    walkins = []; saveWalkins();
     $('clr').close(); render();
   };
   $('b-restore').onclick = () => { hidden = []; saveHidden(); render(); };
@@ -480,7 +500,7 @@
       st.className = 'status bad'; stxt.textContent = 'Not connected'; return;
     }
     if (lastData) {
-      const q = compute(visible(lastData.slots)); lastQ = q;
+      const q = compute(queueOf(lastData.slots)); lastQ = q;
       $('b-restore').hidden = !hidden.length;
       free = nextFree(visible(lastData.slots));
       put('now', q.now, 'nobody yet'); put('next', q.next, '—'); put('then', q.then, '—');
