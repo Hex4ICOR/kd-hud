@@ -408,8 +408,10 @@
   // ---- joining: the HUD can't write to the sheet, so these open the sheet at the right cell ----
   function nextFree(slots) {
     const d = new Date(), nowMin = d.getHours() * 60 + d.getMinutes();
-    return slots.find(s => { if (s.who || s.status) return false; const m = /^(\d{1,2}):(\d\d)/.exec(s.time);
-      return m && (+m[1] * 60 + +m[2]) > nowMin - 5; }) || null;
+    return slots.find(s => { if (s.who || s.status) return false; const m = /^(\d{1,2}):(\d\d)\s*([ap])?/i.exec(s.time);
+      if (!m) return false;
+      const ap = (m[3] || '').toLowerCase(), h = ap ? (+m[1] % 12) + (ap === 'p' ? 12 : 0) : +m[1]; // reads 6:30 pm and 18:30
+      return (h * 60 + +m[2]) > nowMin - 5; }) || null;
   }
   const sheetAt = row => `https://docs.google.com/spreadsheets/d/${sheetId}/edit#gid=0` + (row ? `&range=B${row}` : '');
   let free = null;
