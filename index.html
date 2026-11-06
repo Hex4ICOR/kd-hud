@@ -218,7 +218,10 @@
       const j = JSON.parse(m[1]);
       if (j.status === 'error') throw new Error((j.errors && j.errors[0] && j.errors[0].detailed_message) || 'sheet error');
       const rows = (j.table.rows || []).map(r => (r.c || []).map(cell));
-      const slots = rows.slice(FIRST_ROW - 1).filter(r => r[0]).map(r => ({ time: r[0], who: (r[1] || '').toUpperCase(), status: r[2] || '' }));
+      // Google can drop leading rows from this feed, so find the table by its header, not by position.
+      const head = rows.findIndex(r => r[1] === 'Initials');
+      const body = head >= 0 ? rows.slice(head + 1) : rows.slice(FIRST_ROW - 1);
+      const slots = body.filter(r => r[0] && !r[0].startsWith('Type your initials')).map(r => ({ time: r[0], who: (r[1] || '').toUpperCase(), status: r[2] || '' }));
       if (!slots.length) throw new Error('no slots found: is this a KnuckleDown sign-up sheet?');
       return { title: '', slots };
     } finally { clearTimeout(t); }
