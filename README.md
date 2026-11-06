@@ -14,6 +14,8 @@ full screen, plus a session timer.
   gviz endpoint. The sheet must have link sharing on (it already does on the day).
 - Only ever shows initials and slot times. It never reads the Focus column and
   never writes to the sheet: Now / Done are still set in the sheet.
+- The next free slot says "Click here to join the queue". That and "Book a time
+  for later" open the sheet at that slot; initials are typed in the sheet.
 - Shows "Live · updated N s ago"; after 35 s without a reply it greys out and
   says when it last updated. A failed read is never shown as an empty queue.
 - Timer start time is kept in this browser (localStorage), so it survives
