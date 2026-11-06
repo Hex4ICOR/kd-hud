@@ -149,7 +149,7 @@
   </div>
 </section>
 <footer>
-  <div class="foot-left"><button class="b-cover" id="b-cover">Cover screen</button><button id="b-last">Back to saved form</button></div>
+  <div class="foot-left"><button class="b-cover" id="b-cover">Cover screen</button><button id="b-last">Back to saved form</button><button class="b-cover" id="b-clear">Clear list</button><button class="b-cover" id="b-restore" hidden>Restore list</button></div>
   <div class="status" id="status"><span class="dot"></span><span id="status-text">Connecting…</span></div>
   <div class="stats" id="stats"></div>
 </footer>
@@ -157,6 +157,8 @@
 <div id="cover"><div class="kd">KnuckleDown</div><div>Thanks, one moment.</div><div class="ring"></div><div style="font-size:13px;opacity:.6">Kenn: press and hold to return</div></div>
 <dialog id="dlg"><h2 id="dlg-title"></h2><p id="dlg-text" style="color:var(--muted)"></p>
   <div class="actions"><button class="b-ghost" id="dlg-no">Not yet</button><button class="b-ghost" id="dlg-mark" hidden></button><button class="b-ghost" id="dlg-form" hidden>Wellbeing form</button><button class="b-primary" id="dlg-yes">Start</button></div></dialog>
+<dialog id="clr"><h2>Clear the list?</h2><p style="color:var(--muted)">Clears everyone shown, the screened ticks and the timer from this iPad. Signed forms on the Mac and the Google sheet are not changed. Anyone newly added or changed in the sheet will appear.</p>
+  <div class="actions"><button class="b-ghost" id="clr-no">Keep list</button><button class="b-primary" id="clr-yes">Clear list</button></div></dialog>
 <div id="form-view">
   <div id="form-bar"><span id="form-msg">Wellbeing screen</span><button id="form-hold">Kenn: press and hold to return</button></div>
   <div id="form-slot"><div id="form-fail"><p>Can't reach the form on the Mac. Check Wi-Fi and Tailscale, or use a paper form and mark it screened.</p>
@@ -388,6 +390,23 @@
     formHoldT = setTimeout(() => { fh.classList.remove('holding'); if (saved) { view.classList.remove('show'); $('b-last').classList.add('show'); render(); } else closeForm(); }, 1200); });
   ['pointerup', 'pointerleave', 'pointercancel'].forEach(ev => fh.addEventListener(ev, () => { clearTimeout(formHoldT); fh.classList.remove('holding'); }));
 
+  // ---- clear list: hides rows on this iPad only; a row edited in the sheet comes back ----
+  const HKEY = 'kd-hud-hidden:' + (demo ? 'demo' : sheetId);
+  const rowId = s => s.time + '|' + s.who + '|' + s.status;
+  let hidden = (() => { try { return JSON.parse(localStorage.getItem(HKEY) || '[]'); } catch (_) { return []; } })();
+  const saveHidden = () => { try { hidden.length ? localStorage.setItem(HKEY, JSON.stringify(hidden)) : localStorage.removeItem(HKEY); } catch (_) {} };
+  const visible = slots => hidden.length ? slots.filter(s => !hidden.includes(rowId(s))) : slots;
+  $('b-clear').onclick = () => $('clr').showModal();
+  $('clr-no').onclick = () => $('clr').close();
+  $('clr-yes').onclick = () => {
+    if (lastData) hidden = lastData.slots.filter(s => s.who || s.status).map(rowId);
+    saveHidden();
+    screened = []; try { localStorage.removeItem(SKEY); } catch (_) {}
+    session = null; save(null); removeFrame(); target = null;
+    $('clr').close(); render();
+  };
+  $('b-restore').onclick = () => { hidden = []; saveHidden(); render(); };
+
   // ---- cover screen for the handover -------------------------------------
   // Hides everyone's initials while a client holds the iPad. A tap does nothing;
   // press and hold for 1.2 s to return. The timer keeps running underneath.
@@ -414,7 +433,8 @@
       st.className = 'status bad'; stxt.textContent = 'Not connected'; return;
     }
     if (lastData) {
-      const q = compute(lastData.slots); lastQ = q;
+      const q = compute(visible(lastData.slots)); lastQ = q;
+      $('b-restore').hidden = !hidden.length;
       put('now', q.now, 'nobody yet'); put('next', q.next, '—'); put('then', q.then, '—');
       $('stats').textContent = `${q.counts.done} done · ${q.counts.waiting} waiting` + (q.counts.noshow ? ` · ${q.counts.noshow} no-show` : '');
       $('title').innerHTML = demo ? '<span class="demo-tag">DEMO</span> · sample data, not a real session' : 'KnuckleDown · live sign-up';
