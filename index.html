@@ -1,0 +1,290 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#1C1A18">
+<title>KnuckleDown HUD</title>
+<!--
+  KnuckleDown on-the-day heads-up display.
+  Reads the session's sign-up sheet (built by build_signup_sheet_v2.py) and shows
+  NOW / NEXT / THEN full screen. Read-only: it never writes to the sheet.
+
+  Open with:  kd-hud.html?sheet=<spreadsheet-id>     live sheet (needs link sharing on)
+              kd-hud.html?demo=1                     labelled sample data, no network
+  Data: Google's gviz endpoint, range A1:C60 of the "Sign-up" tab, polled every 10 s.
+  Initials only ever appear; the Focus column is never requested.
+  Session timer: tap NOW or NEXT, confirm, and a countdown runs (default 15 min, ?mins=N).
+  The start time is kept in this browser (localStorage) so the timer survives handing the
+  iPad over for the intake form, switching apps, or a reload. No form data ever passes
+  through this page. Timer state is local to this device; the sheet is still the record:
+  mark Now / Done there.
+-->
+<style>
+  :root {
+    --bg: #1C1A18; --panel: #2A2623; --ink: #F2EEEA; --muted: #A89E94;
+    --now: #B85A1A; --now-ink: #FFFFFF; --next: #3A3632; --next-ink: #F0A868;
+    --ok: #7BC47F; --warn: #F0A868; --bad: #E8746A; --done: #6F6862;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; overflow: hidden; overscroll-behavior: none; touch-action: none; }
+  body {
+    background: var(--bg); color: var(--ink);
+    font-family: Montserrat, -apple-system, "Segoe UI", Roboto, sans-serif;
+    display: grid; grid-template-rows: auto 1fr auto; height: 100dvh;
+    padding: max(16px, env(safe-area-inset-top)) max(16px, env(safe-area-inset-right))
+             max(12px, env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left));
+    gap: 14px; -webkit-user-select: none; user-select: none;
+  }
+  header { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
+  .title { font-weight: 700; font-size: clamp(14px, 2.2vw, 20px); color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .clock { font-weight: 800; font-size: clamp(22px, 4vw, 40px); font-variant-numeric: tabular-nums; }
+  main { display: grid; gap: 14px; grid-template-rows: 2fr 1.2fr 1fr; min-height: 0; }
+  .card { border-radius: 18px; padding: clamp(14px, 3vw, 28px); display: flex; align-items: center; gap: clamp(14px, 3vw, 32px); min-height: 0; overflow: hidden; }
+  .label { font-weight: 800; letter-spacing: .08em; font-size: clamp(14px, 2.6vw, 26px); min-width: 4.2em; opacity: .9; }
+  .time { font-weight: 700; font-variant-numeric: tabular-nums; opacity: .85; }
+  .who { font-weight: 900; letter-spacing: .04em; }
+  .now  { background: var(--now); color: var(--now-ink); }
+  .now .time { font-size: clamp(28px, 7vw, 72px); }
+  .now .who  { font-size: clamp(56px, 16vw, 180px); line-height: 1; }
+  .next { background: var(--next); color: var(--next-ink); }
+  .next .time { font-size: clamp(20px, 4.5vw, 44px); }
+  .next .who  { font-size: clamp(36px, 9vw, 96px); }
+  .then { background: var(--panel); color: var(--ink); }
+  .then .time { font-size: clamp(16px, 3.5vw, 32px); }
+  .then .who  { font-size: clamp(26px, 6vw, 64px); }
+  .empty .who { opacity: .55; font-weight: 700; font-size: clamp(22px, 5vw, 48px); }
+  footer { display: flex; justify-content: space-between; align-items: center; gap: 12px; font-size: clamp(12px, 1.8vw, 16px); color: var(--muted); }
+  .status { display: flex; align-items: center; gap: 8px; }
+  .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--muted); flex: none; }
+  .status.ok .dot { background: var(--ok); }
+  .status.stale .dot { background: var(--warn); }
+  .status.bad .dot { background: var(--bad); }
+  .status.bad { color: var(--bad); font-weight: 700; }
+  .stats { font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .banner { position: fixed; inset: auto 16px 52px 16px; background: var(--bad); color: #1C1A18; font-weight: 800; border-radius: 12px; padding: 10px 14px; display: none; font-size: clamp(13px, 2vw, 18px); }
+  .banner.show { display: block; }
+  body.stale main { opacity: .45; filter: grayscale(.6); }
+  .demo-tag { color: var(--warn); font-weight: 800; }
+
+  .card.tap { cursor: pointer; }
+  .card.tap:active { filter: brightness(1.15); }
+  .hint { margin-left: auto; font-size: clamp(12px, 1.8vw, 16px); font-weight: 700; opacity: .7; white-space: nowrap; }
+  /* session (timer) view */
+  #session { display: none; grid-template-rows: auto 1fr auto auto; gap: 14px; min-height: 0; }
+  body.in-session main { display: none; }
+  body.in-session #session { display: grid; }
+  .s-who { display: flex; align-items: baseline; gap: 18px; font-weight: 800; color: var(--muted); font-size: clamp(18px, 3vw, 30px); }
+  .s-who b { color: var(--ink); font-size: clamp(28px, 6vw, 64px); font-weight: 900; }
+  .timer { display: flex; align-items: center; justify-content: center; border-radius: 22px; background: var(--now); color: var(--now-ink);
+           font-weight: 900; font-variant-numeric: tabular-nums; font-size: clamp(90px, 26vw, 320px); line-height: 1; min-height: 0; }
+  .timer.soon { background: #8A5A12; }
+  .timer.over { background: var(--panel); color: var(--next-ink); flex-direction: column; font-size: clamp(36px, 9vw, 110px); gap: 10px; text-align: center; }
+  .timer.over small { font-size: .4em; color: var(--muted); font-weight: 700; }
+  .s-next { background: var(--next); color: var(--next-ink); border-radius: 18px; padding: 14px 20px; display: flex; gap: 18px; align-items: baseline; font-weight: 800; font-size: clamp(18px, 3vw, 30px); }
+  .s-next b { font-size: 1.5em; font-weight: 900; }
+  .s-warn { color: var(--warn); font-weight: 700; font-size: clamp(13px, 2vw, 18px); min-height: 1.2em; }
+  .actions { display: flex; gap: 12px; }
+  button { font: inherit; font-weight: 800; border: 0; border-radius: 14px; padding: 16px 22px; font-size: clamp(16px, 2.4vw, 22px); cursor: pointer; }
+  .b-primary { background: var(--now); color: var(--now-ink); flex: 1; }
+  .b-ghost { background: var(--panel); color: var(--ink); }
+  dialog { margin: auto; border: 0; border-radius: 20px; background: var(--panel); color: var(--ink); padding: 26px; width: min(520px, 92vw); }
+  dialog::backdrop { background: rgba(0,0,0,.6); }
+  dialog h2 { font-size: clamp(22px, 4vw, 34px); margin-bottom: 18px; }
+  dialog .actions { margin-top: 18px; }
+  @media (orientation: landscape) and (max-height: 520px) {
+    main { grid-template-rows: 1.6fr 1fr 1fr; gap: 8px; }
+    body { gap: 8px; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <div class="title" id="title">KnuckleDown</div>
+  <div class="clock" id="clock">--:--</div>
+</header>
+<main>
+  <section class="card now empty tap" id="c-now"><span class="label">NOW</span><span class="time" id="t-now"></span><span class="who" id="w-now">loading…</span><span class="hint" id="h-now"></span></section>
+  <section class="card next empty tap" id="c-next"><span class="label">NEXT</span><span class="time" id="t-next"></span><span class="who" id="w-next">—</span><span class="hint" id="h-next"></span></section>
+  <section class="card then empty" id="c-then"><span class="label">THEN</span><span class="time" id="t-then"></span><span class="who" id="w-then">—</span></section>
+</main>
+<section id="session">
+  <div class="s-who">IN THE CHAIR <b id="s-who"></b><span id="s-slot"></span></div>
+  <div class="timer" id="timer">15:00</div>
+  <div class="s-next" id="s-next"></div>
+  <div>
+    <div class="s-warn" id="s-warn"></div>
+    <div class="actions"><button class="b-ghost" id="b-cancel">Undo start</button><button class="b-primary" id="b-finish">Finish · show next</button></div>
+  </div>
+</section>
+<footer>
+  <div class="status" id="status"><span class="dot"></span><span id="status-text">Connecting…</span></div>
+  <div class="stats" id="stats"></div>
+</footer>
+<div class="banner" id="banner"></div>
+<dialog id="dlg"><h2 id="dlg-title"></h2><p id="dlg-text" style="color:var(--muted)"></p>
+  <div class="actions"><button class="b-ghost" id="dlg-no">Not yet</button><button class="b-primary" id="dlg-yes">Start</button></div></dialog>
+
+<script>
+(() => {
+  const POLL_MS = 10000, STALE_MS = 35000, TIMEOUT_MS = 8000, FIRST_ROW = 6;
+  const qs = new URLSearchParams(location.search);
+  const sheetId = (qs.get('sheet') || '').replace(/[^A-Za-z0-9_-]/g, '');
+  const demo = qs.get('demo') === '1';
+  const $ = id => document.getElementById(id);
+  let lastOk = 0, lastData = null, inFlight = false, lastErr = '';
+
+  // ---- clock + wake lock -------------------------------------------------
+  const pad = n => String(n).padStart(2, '0');
+  const tick = () => { const d = new Date(); $('clock').textContent = pad(d.getHours()) + ':' + pad(d.getMinutes()); render(); };
+  setInterval(tick, 1000);
+  async function keepAwake() { try { if ('wakeLock' in navigator) await navigator.wakeLock.request('screen'); } catch (_) {} }
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) { keepAwake(); poll(); } });
+  keepAwake();
+
+  // ---- the queue rule (mirrors the sheet's formulas) ---------------------
+  // NOW = first slot with Status "Now". Waiting = initials present, not LUNCH/BREAK,
+  // Status blank / Booked / Walk-up, in time order wherever the row is.
+  function compute(slots) {
+    const now = slots.find(s => s.status === 'Now') || null;
+    const waiting = slots.filter(s => s.who && s.who !== 'LUNCH' && s.who !== 'BREAK' &&
+      (s.status === '' || s.status === 'Booked' || s.status === 'Walk-up'));
+    const counts = { done: slots.filter(s => s.status === 'Done').length,
+                     noshow: slots.filter(s => s.status === 'No-show').length,
+                     waiting: waiting.length };
+    return { now, next: waiting[0] || null, then: waiting[1] || null, counts };
+  }
+
+  // ---- data: gviz (live) or labelled demo --------------------------------
+  function demoData() {
+    const mins = Math.floor(Date.now() / 15000) % 6; // rotates so the display visibly moves
+    const base = [['10:00','AB'],['10:20','CD'],['10:40','EF'],['11:00','GH'],['11:20','IJ'],['11:40','KL']];
+    const slots = base.map(([time, who], i) => ({ time, who,
+      status: i < mins ? (i === 1 ? 'No-show' : 'Done') : i === mins ? 'Now' : (i === 5 ? 'Walk-up' : '') }));
+    return { title: 'DEMO · sample data, not a real session', slots };
+  }
+
+  function cell(c) { return c ? String(c.f != null ? c.f : (c.v != null ? c.v : '')).trim() : ''; }
+
+  async function fetchSheet() {
+    const url = `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:json&headers=0&sheet=Sign-up&range=A1:C60&tq=${encodeURIComponent('select A,B,C')}&_=${Date.now()}`;
+    const ctl = new AbortController(); const t = setTimeout(() => ctl.abort(), TIMEOUT_MS);
+    try {
+      const res = await fetch(url, { signal: ctl.signal, cache: 'no-store', credentials: 'omit' });
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      const txt = await res.text();
+      const m = txt.match(/setResponse\(([\s\S]*)\);?\s*$/);
+      if (!m) throw new Error(txt.includes('<html') ? 'sheet is not shared (needs link sharing)' : 'unexpected reply');
+      const j = JSON.parse(m[1]);
+      if (j.status === 'error') throw new Error((j.errors && j.errors[0] && j.errors[0].detailed_message) || 'sheet error');
+      const rows = (j.table.rows || []).map(r => (r.c || []).map(cell));
+      const slots = rows.slice(FIRST_ROW - 1).filter(r => r[0]).map(r => ({ time: r[0], who: (r[1] || '').toUpperCase(), status: r[2] || '' }));
+      if (!slots.length) throw new Error('no slots found: is this a KnuckleDown sign-up sheet?');
+      return { title: '', slots };
+    } finally { clearTimeout(t); }
+  }
+
+  async function poll() {
+    if (inFlight || (!sheetId && !demo)) return; inFlight = true;
+    try {
+      lastData = demo ? demoData() : await fetchSheet();
+      lastOk = Date.now(); lastErr = ''; $('banner').classList.remove('show');
+    } catch (e) {
+      const msg = e.name === 'AbortError' ? 'no reply from Google'
+        : /Failed to fetch|NetworkError|Load failed/i.test(e.message) ? 'check Wi-Fi, and that link sharing is on' : e.message;
+      lastErr = msg;
+      $('banner').textContent = lastData
+        ? `Connection lost (${msg}). Showing the board as it was at ${fmt(lastOk)}. Check the sheet itself.`
+        : `Can't read the sheet: ${msg}.`;
+      $('banner').classList.add('show');
+    } finally { inFlight = false; render(); }
+  }
+  const fmt = ts => { const d = new Date(ts); return pad(d.getHours()) + ':' + pad(d.getMinutes()) + ':' + pad(d.getSeconds()); };
+
+
+  // ---- session timer -----------------------------------------------------
+  const MINS = Math.max(1, Math.min(90, parseInt(qs.get('mins') || '15', 10) || 15));
+  const KEY = 'kd-hud-session:' + (demo ? 'demo' : sheetId);
+  const load = () => { try { return JSON.parse(localStorage.getItem(KEY) || 'null'); } catch (_) { return null; } };
+  const save = v => { try { v ? localStorage.setItem(KEY, JSON.stringify(v)) : localStorage.removeItem(KEY); } catch (_) {} };
+  let session = load(), pending = null, lastQ = null;
+
+  function ask(slot) {
+    if (!slot || session) return;
+    pending = slot;
+    $('dlg-title').textContent = `Start ${MINS} min for ${slot.who}?`;
+    $('dlg-text').textContent = `${slot.time} slot. Start once they're in the chair, after the health form. Remember to set them to Now in the sheet.`;
+    $('dlg').showModal();
+  }
+  $('dlg-yes').onclick = () => { session = { who: pending.who, time: pending.time, start: Date.now(), mins: MINS }; save(session); $('dlg').close(); render(); };
+  $('dlg-no').onclick = () => { pending = null; $('dlg').close(); };
+  $('c-now').onclick = () => lastQ && ask(lastQ.now);
+  $('c-next').onclick = () => lastQ && ask(lastQ.next);
+  $('b-finish').onclick = () => { session = null; save(null); render(); };
+  $('b-cancel').onclick = () => { session = null; save(null); render(); };
+
+  function renderSession(q) {
+    document.body.classList.toggle('in-session', !!session);
+    if (!session) return;
+    const left = session.start + session.mins * 60000 - Date.now();
+    const t = $('timer');
+    $('s-who').textContent = session.who; $('s-slot').textContent = session.time + ' slot';
+    // the person in the chair is not "next": skip them when choosing what's next
+    const waiting = q ? [q.now, q.next, q.then].filter(x => x && x.who !== session.who) : [];
+    const nx = q ? (q.next && q.next.who !== session.who ? q.next : q.then) : null;
+    $('s-next').innerHTML = nx ? `NEXT <b>${nx.who}</b> ${nx.time}` : 'NEXT <b>—</b> nobody waiting';
+    $('s-next').style.display = left > 0 ? '' : 'none';
+    if (left > 0) {
+      const m = Math.floor(left / 60000), sec = Math.floor(left % 60000 / 1000);
+      t.className = 'timer' + (left <= 120000 ? ' soon' : '');
+      t.textContent = m + ':' + pad(sec);
+    } else {
+      const over = -left, m = Math.floor(over / 60000);
+      t.className = 'timer over';
+      t.innerHTML = nx ? `Next: ${nx.who}<small>${nx.time} · time's up${m ? ' ' + m + ' min ago' : ''}</small>`
+                       : `Time's up<small>nobody else waiting</small>`;
+    }
+    const sheetNow = q && q.now ? q.now.who : '';
+    $('s-warn').textContent = q && sheetNow !== session.who
+      ? (sheetNow ? `Sheet still shows ${sheetNow} as Now. Update it when you can.` : `Sheet has nobody as Now. Set ${session.who} to Now.`)
+      : '';
+  }
+
+  // ---- render ------------------------------------------------------------
+  function put(key, slot, emptyText) {
+    const card = $('c-' + key);
+    $('t-' + key).textContent = slot ? slot.time : '';
+    $('w-' + key).textContent = slot ? slot.who : emptyText;
+    card.classList.toggle('empty', !slot);
+  }
+  function render() {
+    const st = $('status'), stxt = $('status-text');
+    if (!sheetId && !demo) {
+      put('now', null, 'No sheet set'); put('next', null, 'Add ?sheet=ID to the address'); put('then', null, '—');
+      st.className = 'status bad'; stxt.textContent = 'Not connected'; return;
+    }
+    if (lastData) {
+      const q = compute(lastData.slots); lastQ = q;
+      put('now', q.now, 'nobody yet'); put('next', q.next, '—'); put('then', q.then, '—');
+      $('stats').textContent = `${q.counts.done} done · ${q.counts.waiting} waiting` + (q.counts.noshow ? ` · ${q.counts.noshow} no-show` : '');
+      $('title').innerHTML = demo ? '<span class="demo-tag">DEMO</span> · sample data, not a real session' : 'KnuckleDown · live sign-up';
+    }
+    renderSession(lastData ? lastQ : null);
+    $('h-now').textContent = !session && lastQ && lastQ.now ? 'tap to time' : '';
+    $('h-next').textContent = !session && lastQ && lastQ.next ? 'tap to start' : '';
+    const age = lastOk ? Date.now() - lastOk : Infinity;
+    document.body.classList.toggle('stale', !!lastOk && age > STALE_MS);
+    if (!lastOk) { st.className = lastErr ? 'status bad' : 'status'; stxt.textContent = lastErr ? 'Not connected' : 'Connecting…';
+      if (lastErr) { put('now', null, 'No live data'); put('next', null, '—'); put('then', null, '—'); } }
+    else if (age > STALE_MS) { st.className = 'status bad'; stxt.textContent = `Not updated since ${fmt(lastOk)}`; }
+    else if (age > POLL_MS * 1.5) { st.className = 'status stale'; stxt.textContent = `Updated ${Math.round(age / 1000)} s ago`; }
+    else { st.className = 'status ok'; stxt.textContent = demo ? 'Demo data, updates every 10 s' : `Live · updated ${Math.round(age / 1000)} s ago`; }
+  }
+
+  tick(); poll(); setInterval(poll, POLL_MS);
+})();
+</script>
+</body>
+</html>
