@@ -20,5 +20,14 @@ full screen, plus a session timer.
   switching to the intake app and reloads. No health or form data passes
   through this page, and none may be added to it.
 
+## Wellbeing form link
+
+Add `&form=<tailnet host:port>&site=<site slug>` to the bookmark. Tap a person to
+open the form from the Mac in a frame over this page. The frame is a different
+origin, so the browser stops this page reading anything in it, and the form sends
+only three words: ready, saved, next. "Screened" is held in this browser as slot and
+initials, for that day, and is never sent to Google, GitHub or anywhere else.
+Add `&embed=0` to open the form in a new tab instead and mark people screened by hand.
+
 This repo holds no client data. The sheet id lives only in the bookmark on
 Kenn's iPad.

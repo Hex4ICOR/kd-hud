@@ -22,6 +22,10 @@
   iPad over for the intake form, switching apps, or a reload. No form data ever passes
   through this page. Timer state is local to this device; the sheet is still the record:
   mark Now / Done there.
+  Wellbeing form (only with &form=<tailnet host:port>&site=<slug> in the bookmark): opens the form
+  from the Mac in a frame on top of this page. The frame is another origin, so the browser stops
+  this page reading any of it. The form says only "ready", "saved" or "next". "Screened" is kept
+  in this browser as slot + initials and is never sent anywhere.
 -->
 <style>
   :root {
@@ -102,6 +106,23 @@
   #cover .ring { width: 64px; height: 64px; border-radius: 50%; border: 4px solid #2A2623; position: relative; }
   #cover.holding .ring { border-color: var(--now); transition: border-color 1.2s linear; }
   .b-cover { background: transparent; color: var(--muted); border: 1px solid #3A3632; padding: 6px 12px; font-size: clamp(12px, 1.8vw, 15px); border-radius: 10px; }
+  .card .tick { font-weight: 800; font-size: clamp(13px, 2vw, 20px); white-space: nowrap; }
+  .tick.yes { color: var(--ok); } .tick.no { opacity: .6; }
+  .s-next .b-form { margin-left: auto; background: var(--now); color: var(--now-ink); padding: 10px 16px; font-size: clamp(14px, 2vw, 20px); }
+  #dlg .actions { flex-wrap: wrap; }
+  #b-last { display: none; background: var(--panel); color: var(--ink); padding: 6px 12px; font-size: clamp(12px, 1.8vw, 15px); border-radius: 10px; }
+  #b-last.show { display: inline-block; }
+  .foot-left { display: flex; gap: 8px; }
+  #form-view { position: fixed; inset: 0; z-index: 20; display: none; flex-direction: column; background: #1C1A18; }
+  #form-view.show { display: flex; }
+  #form-bar { flex: none; display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: max(8px, env(safe-area-inset-top)) 16px 8px; color: var(--muted); font-size: 14px; }
+  #form-hold { background: var(--panel); color: var(--muted); padding: 8px 14px; font-size: 14px; border-radius: 10px; white-space: nowrap; }
+  #form-hold.holding { outline: 3px solid var(--now); }
+  #form-slot { flex: 1; min-height: 0; position: relative; }
+  #form-slot iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; background: #1C1A18; }
+  #form-fail { position: absolute; inset: 0; z-index: 1; display: none; flex-direction: column; align-items: center; justify-content: center; gap: 16px; padding: 24px; text-align: center; background: #1C1A18; }
+  #form-fail.show { display: flex; }
+  #form-fail p { font-size: clamp(16px, 2.6vw, 22px); max-width: 32em; }
   @media (orientation: landscape) and (max-height: 520px) {
     main { grid-template-rows: 1.6fr 1fr 1fr; gap: 8px; }
     body { gap: 8px; }
@@ -114,9 +135,9 @@
   <div class="clock" id="clock">--:--</div>
 </header>
 <main>
-  <section class="card now empty tap" id="c-now"><span class="label">NOW</span><span class="time" id="t-now"></span><span class="who" id="w-now">loading…</span><span class="hint" id="h-now"></span></section>
-  <section class="card next empty tap" id="c-next"><span class="label">NEXT</span><span class="time" id="t-next"></span><span class="who" id="w-next">—</span><span class="hint" id="h-next"></span></section>
-  <section class="card then empty" id="c-then"><span class="label">THEN</span><span class="time" id="t-then"></span><span class="who" id="w-then">—</span></section>
+  <section class="card now empty tap" id="c-now"><span class="label">NOW</span><span class="time" id="t-now"></span><span class="who" id="w-now">loading…</span><span class="tick" id="k-now"></span><span class="hint" id="h-now"></span></section>
+  <section class="card next empty tap" id="c-next"><span class="label">NEXT</span><span class="time" id="t-next"></span><span class="who" id="w-next">—</span><span class="tick" id="k-next"></span><span class="hint" id="h-next"></span></section>
+  <section class="card then empty" id="c-then"><span class="label">THEN</span><span class="time" id="t-then"></span><span class="who" id="w-then">—</span><span class="tick" id="k-then"></span></section>
 </main>
 <section id="session">
   <div class="s-who">IN THE CHAIR <b id="s-who"></b><span id="s-slot"></span></div>
@@ -128,14 +149,19 @@
   </div>
 </section>
 <footer>
-  <button class="b-cover" id="b-cover">Cover screen</button>
+  <div class="foot-left"><button class="b-cover" id="b-cover">Cover screen</button><button id="b-last">Back to saved form</button></div>
   <div class="status" id="status"><span class="dot"></span><span id="status-text">Connecting…</span></div>
   <div class="stats" id="stats"></div>
 </footer>
 <div class="banner" id="banner"></div>
 <div id="cover"><div class="kd">KnuckleDown</div><div>Thanks, one moment.</div><div class="ring"></div><div style="font-size:13px;opacity:.6">Kenn: press and hold to return</div></div>
 <dialog id="dlg"><h2 id="dlg-title"></h2><p id="dlg-text" style="color:var(--muted)"></p>
-  <div class="actions"><button class="b-ghost" id="dlg-no">Not yet</button><button class="b-primary" id="dlg-yes">Start</button></div></dialog>
+  <div class="actions"><button class="b-ghost" id="dlg-no">Not yet</button><button class="b-ghost" id="dlg-mark" hidden></button><button class="b-ghost" id="dlg-form" hidden>Wellbeing form</button><button class="b-primary" id="dlg-yes">Start</button></div></dialog>
+<div id="form-view">
+  <div id="form-bar"><span id="form-msg">Wellbeing screen</span><button id="form-hold">Kenn: press and hold to return</button></div>
+  <div id="form-slot"><div id="form-fail"><p>Can't reach the form on the Mac. Check Wi-Fi and Tailscale, or use a paper form and mark it screened.</p>
+    <div class="actions"><button class="b-primary" id="fail-retry">Try again</button><button class="b-ghost" id="fail-tab">Open in a new tab</button><button class="b-ghost" id="fail-back">Back to board</button></div></div></div>
+</div>
 
 <script>
 (() => {
@@ -222,18 +248,44 @@
   let session = load(), pending = null, lastQ = null;
 
   function ask(slot) {
-    if (!slot || session) return;
+    if (!slot || $('dlg').open) return;
     pending = slot;
-    $('dlg-title').textContent = `Start ${MINS} min for ${slot.who}?`;
-    $('dlg-text').textContent = `${slot.time} slot. Start once they're in the chair, after the health form. Remember to set them to Now in the sheet.`;
+    const done = isScreened(slot);
+    $('dlg-title').textContent = session ? slot.who : `Start ${MINS} min for ${slot.who}?`;
+    $('dlg-text').textContent = `${slot.time} slot. ` + (session ? '' : `Start once they're in the chair. Remember to set them to Now in the sheet. `)
+      + (FORM ? (done ? 'Screened on this iPad.' : 'No wellbeing screen recorded on this iPad.') : '');
+    $('dlg-yes').hidden = !!session;
+    $('dlg-form').hidden = !FORM;
+    $('dlg-mark').hidden = !FORM;
+    $('dlg-mark').textContent = done ? 'Clear screened' : 'Mark screened (paper)';
     $('dlg').showModal();
   }
   $('dlg-yes').onclick = () => { session = { who: pending.who, time: pending.time, start: Date.now(), mins: MINS }; save(session); $('dlg').close(); render(); };
+  $('dlg-mark').onclick = () => { setScreened(pending, !isScreened(pending)); pending = null; $('dlg').close(); render(); };
+  $('dlg-form').onclick = () => { const who = pending; pending = null; $('dlg').close(); openForm(who); };
   $('dlg-no').onclick = () => { pending = null; $('dlg').close(); };
   $('c-now').onclick = () => lastQ && ask(lastQ.now);
   $('c-next').onclick = () => lastQ && ask(lastQ.next);
+  $('c-then').onclick = () => FORM && lastQ && ask(lastQ.then);
   $('b-finish').onclick = () => { session = null; save(null); render(); };
   $('b-cancel').onclick = () => { session = null; save(null); render(); };
+
+  function renderSessionNext(nx) {
+    const row = $('s-next');
+    if (!nx) { delete row.dataset.key; const b = document.createElement('b'); b.textContent = '—'; row.replaceChildren('NEXT ', b, ' nobody waiting'); return; }
+    const key = nx.time + '|' + nx.who + '|' + isScreened(nx) + '|' + !!FORM;
+    if (row.dataset.key === key) return; // the bar redraws every second; keep the button under his finger
+    row.dataset.key = key;
+    const b = document.createElement('b'); b.textContent = nx.who;
+    const parts = ['NEXT ', b, ' ' + nx.time];
+    if (FORM) {
+      const tick = document.createElement('span'); tick.className = 'tick ' + (isScreened(nx) ? 'yes' : 'no');
+      tick.textContent = isScreened(nx) ? ' ✓ screened' : ' not screened'; parts.push(tick);
+      const go = document.createElement('button'); go.className = 'b-form'; go.textContent = 'Wellbeing form';
+      go.onclick = () => openForm(nx); if (!isScreened(nx)) parts.push(go); else { go.textContent = 'Options'; go.onclick = () => ask(nx); parts.push(go); }
+    }
+    row.replaceChildren(...parts);
+  }
 
   function renderSession(q) {
     document.body.classList.toggle('in-session', !!session);
@@ -244,7 +296,7 @@
     // the person in the chair is not "next": skip them when choosing what's next
     const waiting = q ? [q.now, q.next, q.then].filter(x => x && x.who !== session.who) : [];
     const nx = q ? (q.next && q.next.who !== session.who ? q.next : q.then) : null;
-    $('s-next').innerHTML = nx ? `NEXT <b>${nx.who}</b> ${nx.time}` : 'NEXT <b>—</b> nobody waiting';
+    renderSessionNext(nx);
     $('s-next').style.display = left > 0 ? '' : 'none';
     if (left > 0) {
       const m = Math.floor(left / 60000), sec = Math.floor(left % 60000 / 1000);
@@ -253,14 +305,88 @@
     } else {
       const over = -left, m = Math.floor(over / 60000);
       t.className = 'timer over';
-      t.innerHTML = nx ? `Next: ${nx.who}<small>${nx.time} · time's up${m ? ' ' + m + ' min ago' : ''}</small>`
-                       : `Time's up<small>nobody else waiting</small>`;
+      const small = document.createElement('small');
+      small.textContent = nx ? `${nx.time} · time's up${m ? ' ' + m + ' min ago' : ''}` : 'nobody else waiting';
+      t.replaceChildren(nx ? `Next: ${nx.who}` : "Time's up", small);
     }
     const sheetNow = q && q.now ? q.now.who : '';
     $('s-warn').textContent = q && sheetNow !== session.who
       ? (sheetNow ? `Sheet still shows ${sheetNow} as Now. Update it when you can.` : `Sheet has nobody as Now. Set ${session.who} to Now.`)
       : '';
   }
+
+  // ---- screened flags: slot + initials, on this iPad only, never sent anywhere ----
+  const today = new Date().toISOString().slice(0, 10);
+  const SKEY = 'kd-hud-screened:' + (demo ? 'demo' : sheetId) + ':' + today;
+  const loadScreened = () => { try { return JSON.parse(localStorage.getItem(SKEY) || '[]'); } catch (_) { return []; } };
+  let screened = loadScreened();
+  try { for (let i = localStorage.length - 1; i >= 0; i--) { const k = localStorage.key(i); if (k.startsWith('kd-hud-screened:') && k !== SKEY) localStorage.removeItem(k); } } catch (_) {}
+  const sid = s => s.time + '|' + s.who;
+  const isScreened = s => !!s && screened.includes(sid(s));
+  function setScreened(s, on) {
+    screened = screened.filter(x => x !== sid(s)); if (on) screened.push(sid(s));
+    try { localStorage.setItem(SKEY, JSON.stringify(screened)); } catch (_) {}
+  }
+
+  // ---- wellbeing form, framed from the Mac --------------------------------
+  // Rotating never exposes the board while a client is mid-form: only after "saved"
+  // does turning to landscape return here. The form stays alive, hidden, for its 2-minute
+  // flagged-answers window so Kenn can go back to it; then it is removed.
+  const formHost = (qs.get('form') || '').toLowerCase();
+  const formSite = qs.get('site') || '';
+  const FORM = /^[a-z0-9.-]+\.ts\.net(:\d+)?$/.test(formHost) && /^[a-z0-9][a-z0-9-]{0,39}$/.test(formSite)
+    ? { origin: 'https://' + formHost, page: 'https://' + formHost + '/kd/screen?site=' + encodeURIComponent(formSite) } : null;
+  const EMBED = qs.get('embed') !== '0';
+  const READY_MS = 8000, FLAG_HOLD_MS = 125000;
+  const view = $('form-view'), slotEl = $('form-slot');
+  let frame = null, target = null, saved = false, readyT = null, wipeT = null;
+
+  function removeFrame() {
+    clearTimeout(readyT); clearTimeout(wipeT);
+    if (frame) { frame.remove(); frame = null; }
+    saved = false; $('b-last').classList.remove('show');
+  }
+  function closeForm() { view.classList.remove('show'); $('form-fail').classList.remove('show'); if (!saved) removeFrame(); render(); }
+  function openForm(who) {
+    if (!FORM) return;
+    target = who;
+    if (!EMBED) { window.open(FORM.page, '_blank'); return; } // saved in the other tab: mark screened by hand
+    removeFrame();
+    $('form-msg').textContent = 'Wellbeing screen';
+    $('form-fail').classList.remove('show');
+    frame = document.createElement('iframe');
+    frame.title = 'Wellbeing screen';
+    frame.referrerPolicy = 'no-referrer';
+    frame.src = FORM.page + '&hud=1';
+    slotEl.appendChild(frame);
+    view.classList.add('show');
+    readyT = setTimeout(() => $('form-fail').classList.add('show'), READY_MS);
+  }
+  window.addEventListener('message', e => {
+    if (!frame || e.source !== frame.contentWindow || !FORM || e.origin !== FORM.origin) return;
+    const ev = e.data && e.data.kdHud;
+    if (ev === 'ready') { clearTimeout(readyT); $('form-fail').classList.remove('show'); }
+    if (ev === 'saved') {
+      saved = true;
+      if (target) setScreened(target, true);
+      $('form-msg').textContent = 'Saved. Kenn: turn to landscape for the board.';
+      clearTimeout(wipeT); wipeT = setTimeout(removeFrame, FLAG_HOLD_MS);
+      render();
+    }
+    if (ev === 'next') { removeFrame(); view.classList.remove('show'); cover.classList.add('show'); render(); }
+  });
+  const landscape = matchMedia('(orientation: landscape)');
+  landscape.addEventListener('change', () => {
+    if (landscape.matches && saved && view.classList.contains('show')) { view.classList.remove('show'); $('b-last').classList.add('show'); render(); }
+  });
+  $('b-last').onclick = () => { if (frame) { view.classList.add('show'); $('b-last').classList.remove('show'); } };
+  $('fail-retry').onclick = () => openForm(target);
+  $('fail-tab').onclick = () => window.open(FORM.page, '_blank');
+  $('fail-back').onclick = () => { removeFrame(); closeForm(); };
+  let formHoldT = null; const fh = $('form-hold');
+  fh.addEventListener('pointerdown', e => { e.preventDefault(); fh.classList.add('holding');
+    formHoldT = setTimeout(() => { fh.classList.remove('holding'); if (saved) { view.classList.remove('show'); $('b-last').classList.add('show'); render(); } else closeForm(); }, 1200); });
+  ['pointerup', 'pointerleave', 'pointercancel'].forEach(ev => fh.addEventListener(ev, () => { clearTimeout(formHoldT); fh.classList.remove('holding'); }));
 
   // ---- cover screen for the handover -------------------------------------
   // Hides everyone's initials while a client holds the iPad. A tap does nothing;
@@ -277,6 +403,9 @@
     $('t-' + key).textContent = slot ? slot.time : '';
     $('w-' + key).textContent = slot ? slot.who : emptyText;
     card.classList.toggle('empty', !slot);
+    const tick = $('k-' + key), done = isScreened(slot);
+    tick.textContent = FORM && slot ? (done ? '✓ screened' : 'not screened') : '';
+    tick.className = 'tick ' + (done ? 'yes' : 'no');
   }
   function render() {
     const st = $('status'), stxt = $('status-text');
@@ -292,7 +421,7 @@
     }
     renderSession(lastData ? lastQ : null);
     $('h-now').textContent = !session && lastQ && lastQ.now ? 'tap to time' : '';
-    $('h-next').textContent = !session && lastQ && lastQ.next ? 'tap to start' : '';
+    $('h-next').textContent = !session && lastQ && lastQ.next ? (FORM && !isScreened(lastQ.next) ? 'tap for form or start' : 'tap to start') : '';
     const age = lastOk ? Date.now() - lastOk : Infinity;
     document.body.classList.toggle('stale', !!lastOk && age > STALE_MS);
     if (!lastOk) { st.className = lastErr ? 'status bad' : 'status'; stxt.textContent = lastErr ? 'Not connected' : 'Connecting…';
