@@ -107,6 +107,7 @@
   #cover.holding .ring { border-color: var(--now); transition: border-color 1.2s linear; }
   .b-cover { background: transparent; color: var(--muted); border: 1px solid #3A3632; padding: 6px 12px; font-size: clamp(12px, 1.8vw, 15px); border-radius: 10px; }
   .card.join .who { opacity: 1; font-weight: 800; font-size: clamp(20px, 3.6vw, 40px); }
+  .s-next .b-form + .b-join { margin-left: 0; }
   .s-next .b-join { margin-left: auto; background: var(--now); color: var(--now-ink); padding: 10px 16px; font-size: clamp(14px, 2vw, 20px); }
   .card .tick { font-weight: 800; font-size: clamp(13px, 2vw, 20px); white-space: nowrap; }
   .tick.yes { color: var(--ok); } .tick.no { opacity: .6; }
@@ -158,7 +159,7 @@
 <div class="banner" id="banner"></div>
 <div id="cover"><div class="kd">KnuckleDown</div><div>Thanks, one moment.</div><div class="ring"></div><div style="font-size:13px;opacity:.6">Kenn: press and hold to return</div></div>
 <dialog id="dlg"><h2 id="dlg-title"></h2><p id="dlg-text" style="color:var(--muted)"></p>
-  <div class="actions"><button class="b-ghost" id="dlg-no">Not yet</button><button class="b-ghost" id="dlg-mark" hidden></button><button class="b-ghost" id="dlg-form" hidden>Wellbeing form</button><button class="b-primary" id="dlg-yes">Start</button></div></dialog>
+  <div class="actions"><button class="b-ghost" id="dlg-no">Not yet</button><button class="b-ghost" id="dlg-mark" hidden></button><button class="b-ghost" id="dlg-join" hidden>Join the queue</button><button class="b-ghost" id="dlg-form" hidden>Wellbeing form</button><button class="b-primary" id="dlg-yes">Start</button></div></dialog>
 <dialog id="clr"><h2>Clear the list?</h2><p style="color:var(--muted)">Clears everyone shown, the screened ticks and the timer from this iPad. Signed forms on the Mac and the Google sheet are not changed. Anyone newly added or changed in the sheet will appear.</p>
   <div class="actions"><button class="b-ghost" id="clr-no">Keep list</button><button class="b-primary" id="clr-yes">Clear list</button></div></dialog>
 <div id="form-view">
@@ -267,15 +268,30 @@
     $('dlg-form').hidden = !FORM;
     $('dlg-mark').hidden = !FORM;
     $('dlg-mark').textContent = done ? 'Clear screened' : 'Mark screened (paper)';
+    $('dlg-join').hidden = true;
     $('dlg').showModal();
   }
+  // Nobody signed up on this card: still offer the form and timer for whoever is here now.
+  function askOpen() {
+    if ($('dlg').open) return;
+    const d = new Date();
+    pending = { who: 'Walk-in', time: free ? free.time : pad(d.getHours()) + ':' + pad(d.getMinutes()) };
+    $('dlg-title').textContent = free ? `${free.time} is free` : 'Nobody on the list';
+    $('dlg-text').textContent = 'For someone here now: open the wellbeing form or start the timer. Their initials can go in the sheet with Join the queue.';
+    $('dlg-yes').hidden = !!session;
+    $('dlg-form').hidden = !FORM;
+    $('dlg-mark').hidden = true;
+    $('dlg-join').hidden = !sheetId;
+    $('dlg').showModal();
+  }
+  $('dlg-join').onclick = () => { pending = null; $('dlg').close(); join(); };
   $('dlg-yes').onclick = () => { session = { who: pending.who, time: pending.time, start: Date.now(), mins: MINS }; save(session); $('dlg').close(); render(); };
   $('dlg-mark').onclick = () => { setScreened(pending, !isScreened(pending)); pending = null; $('dlg').close(); render(); };
   $('dlg-form').onclick = () => { const who = pending; pending = null; $('dlg').close(); openForm(who); };
   $('dlg-no').onclick = () => { pending = null; $('dlg').close(); };
-  $('c-now').onclick = () => lastQ && ask(lastQ.now);
-  $('c-next').onclick = () => { if (!lastQ) return; if (lastQ.next) ask(lastQ.next); else if (free) join(); };
-  $('c-then').onclick = () => { if (!lastQ) return; if (lastQ.then) { if (FORM) ask(lastQ.then); } else if (lastQ.next && free) join(); };
+  $('c-now').onclick = () => { if (!lastQ) return; if (lastQ.now) ask(lastQ.now); else askOpen(); };
+  $('c-next').onclick = () => { if (!lastQ) return; if (lastQ.next) ask(lastQ.next); else askOpen(); };
+  $('c-then').onclick = () => { if (!lastQ) return; if (lastQ.then) { if (FORM) ask(lastQ.then); } else askOpen(); };
   $('b-finish').onclick = () => { session = null; save(null); render(); };
   $('b-cancel').onclick = () => { session = null; save(null); render(); };
 
@@ -287,6 +303,7 @@
       row.dataset.key = key;
       const b = document.createElement('b'); b.textContent = '—';
       const parts = ['NEXT ', b, ' nobody waiting'];
+      if (FORM) { const f = document.createElement('button'); f.className = 'b-form'; f.textContent = 'Wellbeing form'; f.onclick = () => openForm({ who: 'Walk-in', time: free ? free.time : '' }); parts.push(f); }
       if (free) { const go = document.createElement('button'); go.className = 'b-join'; go.textContent = 'Click here to join the queue'; go.onclick = join; parts.push(go); }
       row.replaceChildren(...parts); return;
     }
@@ -327,7 +344,7 @@
       t.replaceChildren(nx ? `Next: ${nx.who}` : "Time's up", small);
     }
     const sheetNow = q && q.now ? q.now.who : '';
-    $('s-warn').textContent = q && sheetNow !== session.who
+    $('s-warn').textContent = q && session.who !== 'Walk-in' && sheetNow !== session.who
       ? (sheetNow ? `Sheet still shows ${sheetNow} as Now. Update it when you can.` : `Sheet has nobody as Now. Set ${session.who} to Now.`)
       : '';
   }
