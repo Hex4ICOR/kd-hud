@@ -33,3 +33,44 @@ Add `&embed=0` to open the form in a new tab instead and mark people screened by
 
 This repo holds no client data. The sheet id lives only in the bookmark on
 Kenn's iPad.
+
+## Sessions app (app.html and v.html)
+
+The fixed-address replacement for the daily sheet link. The old display above still works
+and stays as the fallback.
+
+- **iPad app:** `https://hex4icor.github.io/kd-hud/app.html`. Add it to the Home Screen once.
+  Sign in once with the KnuckleDown database login; it stays signed in.
+  Sample data, no sign-in: `app.html?demo=1`.
+- **Venue page:** `https://hex4icor.github.io/kd-hud/v.html?v=<venue>` (for example `?v=tca`).
+  This is the link a venue forwards. It shows what the session is, which times are free or taken,
+  and whether the chair is busy and for about how long. People add initials to a free time.
+  Sample: `v.html?demo=1`.
+
+How it stays live:
+
+- Venues, session days and slots live in the KnuckleDown Supabase project (tables `sess_venues`,
+  `sess_days`, `sess_slots`). "Today" is always worked out in Glasgow time on each refresh, so the
+  board and the venue page never show an earlier day. The board refreshes every 5 seconds, the
+  venue page every 10.
+- A day is a venue, a date and a from/until time. Free slots are worked out from those and the
+  venue's slot length; only taken slots are stored. Change any of it in Set-up on the iPad.
+- With no session set for today the board offers "Start today's session" (venue, from, until).
+- Changes made on the iPad show at once and are queued if the connection drops, then sent when
+  it returns. The footer says Live, Saving, or when it last updated.
+
+What is and is not stored:
+
+- Initials, slot time, status (waiting, in the chair, done, no-show), and two yes/no ticks:
+  screened and paid. Nothing else. No names, no contact details, no health or form content.
+- The tables are closed to everyone except the signed-in owner (row level security through
+  `is_app_owner()`). The venue page can only call two functions: `sess_public` (times taken and
+  chair status, never initials) and `sess_public_join` (add initials to a free time on an open day).
+- The wellbeing form is still the Mac form in a frame (the venue's "Wellbeing form address"),
+  with the same three words as above. "Paid" is set by Kenn's press-and-hold after seeing the
+  customer's confirmation; the QR code is the venue's Stripe payment link.
+- `sessions-config.js` holds the project address and the publishable key. That key is meant to be
+  public; it gives no access to the tables.
+
+`vendor/` holds pinned copies of supabase-js 2.45.4 and qrcode-generator 1.4.4 so the app does
+not depend on a CDN on the day.

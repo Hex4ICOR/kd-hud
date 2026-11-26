@@ -1,0 +1,615 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Sessions">
+<meta name="theme-color" content="#1C1A18">
+<link rel="manifest" href="sessions.webmanifest">
+<link rel="apple-touch-icon" href="icon-180.png">
+<link rel="icon" href="icon-180.png">
+<title>KnuckleDown Sessions</title>
+<!--
+  KnuckleDown Sessions: the iPad app for session days. One fixed address, no daily link.
+  The list (venues, days, slots) lives in the KnuckleDown database and is always today's.
+  Holds initials and slot times only. No names, no health or form data passes through this page:
+  the wellbeing form is still framed from the Mac and says only "ready", "saved" or "next".
+  Try it with sample data and no sign-in: app.html?demo=1
+-->
+<style>
+  :root {
+    --bg: #1C1A18; --panel: #2A2623; --ink: #F2EEEA; --muted: #A89E94;
+    --now: #B85A1A; --now-ink: #FFFFFF; --next: #3A3632; --next-ink: #F0A868;
+    --ok: #7BC47F; --warn: #F0A868; --bad: #E8746A; --done: #6F6862;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; overflow: hidden; overscroll-behavior: none; }
+  body {
+    background: var(--bg); color: var(--ink);
+    font-family: Montserrat, -apple-system, "Segoe UI", Roboto, sans-serif;
+    display: grid; grid-template-rows: auto 1fr auto; height: 100dvh;
+    padding: max(16px, env(safe-area-inset-top)) max(16px, env(safe-area-inset-right))
+             max(12px, env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left));
+    gap: 14px; -webkit-user-select: none; user-select: none; -webkit-tap-highlight-color: transparent;
+  }
+  input, select, textarea { font: inherit; -webkit-user-select: text; user-select: text; color: var(--ink); background: var(--bg);
+    border: 1px solid #4A443F; border-radius: 10px; padding: 12px 14px; width: 100%; font-size: 17px; }
+  input:focus, select:focus, textarea:focus, button:focus-visible { outline: 3px solid var(--now); outline-offset: 1px; }
+  header { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
+  .title { font-weight: 700; font-size: clamp(14px, 2.2vw, 20px); color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .clock { font-weight: 800; font-size: clamp(22px, 4vw, 40px); font-variant-numeric: tabular-nums; }
+  main { display: grid; gap: 14px; grid-template-rows: 2fr 1.2fr 1fr; min-height: 0; }
+  .card { border-radius: 18px; padding: clamp(14px, 3vw, 28px); display: flex; align-items: center; gap: clamp(14px, 3vw, 32px); min-height: 0; overflow: hidden; cursor: pointer; }
+  .card:active { filter: brightness(1.15); }
+  .label { font-weight: 800; letter-spacing: .08em; font-size: clamp(14px, 2.6vw, 26px); min-width: 4.2em; opacity: .9; }
+  .time { font-weight: 700; font-variant-numeric: tabular-nums; opacity: .85; }
+  .who { font-weight: 900; letter-spacing: .04em; }
+  .now  { background: var(--now); color: var(--now-ink); }
+  .now .time { font-size: clamp(28px, 7vw, 72px); } .now .who { font-size: clamp(56px, 16vw, 180px); line-height: 1; }
+  .next { background: var(--next); color: var(--next-ink); }
+  .next .time { font-size: clamp(20px, 4.5vw, 44px); } .next .who { font-size: clamp(36px, 9vw, 96px); }
+  .then { background: var(--panel); color: var(--ink); }
+  .then .time { font-size: clamp(16px, 3.5vw, 32px); } .then .who { font-size: clamp(26px, 6vw, 64px); }
+  .empty .who { opacity: .6; font-weight: 700; font-size: clamp(20px, 4.4vw, 44px); letter-spacing: 0; }
+  .tick { font-weight: 800; font-size: clamp(13px, 2vw, 20px); white-space: nowrap; margin-left: auto; text-align: right; line-height: 1.5; }
+  .tick .y { color: var(--ok); } .tick .n { opacity: .65; }
+  .now .tick .y { color: #fff; }
+  footer { display: flex; justify-content: space-between; align-items: center; gap: 12px; font-size: clamp(12px, 1.8vw, 16px); color: var(--muted); }
+  .foot-left { display: flex; gap: 8px; flex-wrap: wrap; }
+  .status { display: flex; align-items: center; gap: 8px; }
+  .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--muted); flex: none; }
+  .status.ok .dot { background: var(--ok); } .status.stale .dot { background: var(--warn); }
+  .status.bad .dot { background: var(--bad); } .status.bad { color: var(--bad); font-weight: 700; }
+  .stats { font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .banner { position: fixed; inset: auto 16px 60px 16px; background: var(--bad); color: #1C1A18; font-weight: 800; border-radius: 12px; padding: 10px 14px; display: none; font-size: clamp(13px, 2vw, 18px); z-index: 40; }
+  .banner.show { display: block; }
+  body.stale main { opacity: .45; filter: grayscale(.6); }
+
+  #session { display: none; grid-template-rows: auto 1fr auto auto; gap: 14px; min-height: 0; }
+  body.in-session main { display: none; } body.in-session #session { display: grid; }
+  body.no-day main, body.no-day #session { display: none; }
+  #noday { display: none; align-content: center; justify-items: center; gap: 16px; text-align: center; overflow: auto; }
+  body.no-day #noday { display: grid; }
+  .s-who { display: flex; align-items: baseline; gap: 18px; font-weight: 800; color: var(--muted); font-size: clamp(18px, 3vw, 30px); }
+  .s-who b { color: var(--ink); font-size: clamp(28px, 6vw, 64px); font-weight: 900; }
+  .timer { display: flex; align-items: center; justify-content: center; border-radius: 22px; background: var(--now); color: var(--now-ink);
+           font-weight: 900; font-variant-numeric: tabular-nums; font-size: clamp(90px, 26vw, 320px); line-height: 1; min-height: 0; }
+  .timer.soon { background: #8A5A12; }
+  .timer.over { background: var(--panel); color: var(--next-ink); flex-direction: column; font-size: clamp(36px, 9vw, 110px); gap: 10px; text-align: center; }
+  .timer.over small { font-size: .4em; color: var(--muted); font-weight: 700; }
+  .s-next { background: var(--next); color: var(--next-ink); border-radius: 18px; padding: 14px 20px; display: flex; gap: 18px; align-items: baseline; font-weight: 800; font-size: clamp(18px, 3vw, 30px); cursor: pointer; }
+  .s-next b { font-size: 1.5em; font-weight: 900; }
+  .actions { display: flex; gap: 12px; flex-wrap: wrap; }
+  button { font: inherit; font-weight: 800; border: 0; border-radius: 14px; padding: 16px 22px; font-size: clamp(16px, 2.4vw, 22px); cursor: pointer; color: var(--ink); background: var(--panel); }
+  button:disabled { opacity: .45; }
+  .b-primary { background: var(--now); color: var(--now-ink); flex: 1; }
+  .b-ghost { background: var(--next); color: var(--ink); }
+  .b-small { background: transparent; color: var(--muted); border: 1px solid #3A3632; padding: 8px 14px; font-size: clamp(13px, 1.8vw, 16px); border-radius: 10px; }
+  dialog { margin: auto; border: 0; border-radius: 20px; background: var(--panel); color: var(--ink); padding: 26px; width: min(560px, 92vw); max-height: 90dvh; overflow: auto; }
+  dialog::backdrop { background: rgba(0,0,0,.6); }
+  dialog h2 { font-size: clamp(22px, 4vw, 34px); margin-bottom: 6px; }
+  dialog p { color: var(--muted); margin-bottom: 16px; }
+  dialog .actions button { flex: 1 1 45%; }
+
+  /* full-screen layers */
+  .layer { position: fixed; inset: 0; z-index: 10; background: var(--bg); display: none; flex-direction: column;
+    padding: max(16px, env(safe-area-inset-top)) max(16px, env(safe-area-inset-right)) max(12px, env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left)); gap: 14px; }
+  .layer.show { display: flex; }
+  .layer .top { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+  .layer h1 { font-size: clamp(20px, 3.4vw, 30px); font-weight: 900; }
+  .scroll { flex: 1; min-height: 0; overflow: auto; -webkit-overflow-scrolling: touch; display: grid; gap: 14px; align-content: start; }
+  .kd { color: var(--now); font-weight: 900; font-size: clamp(22px, 4vw, 36px); letter-spacing: .04em; }
+  .hold { background: transparent; color: var(--muted); border: 1px solid #3A3632; padding: 8px 14px; font-size: 14px; border-radius: 10px; white-space: nowrap; }
+  .hold.holding { outline: 3px solid var(--now); }
+
+  #cover { z-index: 30; background: #0E0D0C; color: var(--muted); align-items: center; justify-content: center; gap: 18px; text-align: center; }
+  #cover .kd { font-size: clamp(32px, 7vw, 72px); }
+
+  /* list */
+  .row { display: flex; align-items: center; gap: 14px; background: var(--panel); border-radius: 14px; padding: 14px 18px; font-size: clamp(16px, 2.4vw, 22px); cursor: pointer; }
+  .row .t { font-weight: 800; font-variant-numeric: tabular-nums; min-width: 3.4em; }
+  .row .w { font-weight: 900; letter-spacing: .04em; min-width: 3em; }
+  .row .s { margin-left: auto; color: var(--muted); font-size: .8em; font-weight: 700; text-align: right; }
+  .row.free { background: transparent; border: 1px dashed #3A3632; color: var(--muted); }
+  .row.past { opacity: .45; }
+  .row.is-now { outline: 3px solid var(--now); }
+  .row.is-done .w, .row.is-noshow .w { color: var(--done); }
+
+  /* kiosk: what the client sees */
+  #kiosk { z-index: 20; }
+  .k-mid { flex: 1; min-height: 0; display: grid; gap: 18px; align-content: center; justify-items: center; text-align: center; overflow: auto; }
+  .k-big { font-weight: 900; font-size: clamp(26px, 5vw, 48px); line-height: 1.1; text-wrap: balance; }
+  .k-sub { color: var(--muted); font-size: clamp(15px, 2.4vw, 22px); max-width: 32em; }
+  .k-slots { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 12px; width: 100%; max-width: 760px; }
+  .k-slot { border-radius: 14px; padding: 16px 0; font-weight: 800; font-size: clamp(20px, 3.2vw, 28px); font-variant-numeric: tabular-nums; background: var(--panel); color: var(--ink); }
+  .k-slot small { display: block; font-size: .5em; font-weight: 700; color: var(--muted); }
+  .k-slot.x { background: transparent; border: 1px dashed #3A3632; color: var(--done); }
+  .k-slot.pick { background: var(--now); color: #fff; } .k-slot.pick small { color: #fff; }
+  #k-ini { text-align: center; font-weight: 900; font-size: clamp(40px, 8vw, 72px); letter-spacing: .1em; width: 5em; text-transform: uppercase; }
+  .qr { background: #fff; border-radius: 16px; padding: 16px; width: min(46vh, 70vw); }
+  .qr svg { display: block; width: 100%; height: auto; }
+  .price { font-weight: 900; font-size: clamp(36px, 7vw, 64px); }
+  .price small { font-size: .45em; color: var(--muted); font-weight: 700; }
+
+  #form-view { z-index: 25; padding: 0; gap: 0; }
+  #form-bar { flex: none; display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: max(8px, env(safe-area-inset-top)) 16px 8px; color: var(--muted); font-size: 14px; }
+  #form-slot { flex: 1; min-height: 0; position: relative; }
+  #form-slot iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; background: var(--bg); }
+  #form-fail { position: absolute; inset: 0; z-index: 1; display: none; flex-direction: column; align-items: center; justify-content: center; gap: 16px; padding: 24px; text-align: center; background: var(--bg); }
+  #form-fail.show { display: flex; }
+
+  /* setup + sign-in */
+  .box { background: var(--panel); border-radius: 16px; padding: 18px; display: grid; gap: 12px; }
+  .box h2 { font-size: 18px; font-weight: 800; }
+  .grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
+  label { display: grid; gap: 4px; font-size: 13px; font-weight: 700; color: var(--muted); }
+  .line { display: flex; justify-content: space-between; align-items: center; gap: 12px; font-weight: 700; }
+  .line small { color: var(--muted); font-weight: 500; }
+  .link { color: var(--next-ink); word-break: break-all; font-size: 14px; -webkit-user-select: text; user-select: text; }
+  #login { z-index: 50; align-items: center; justify-content: center; }
+  #login .box { width: min(420px, 100%); }
+  .msg { color: var(--warn); font-weight: 700; min-height: 1.3em; font-size: 14px; }
+  .demo-tag { color: var(--warn); font-weight: 800; }
+</style>
+</head>
+<body>
+<header>
+  <div class="title" id="title">KnuckleDown</div>
+  <div class="clock" id="clock">--:--</div>
+</header>
+
+<main>
+  <section class="card now empty" id="c-now"><span class="label">NOW</span><span class="time" id="t-now"></span><span class="who" id="w-now">loading…</span><span class="tick" id="k-now"></span></section>
+  <section class="card next empty" id="c-next"><span class="label">NEXT</span><span class="time" id="t-next"></span><span class="who" id="w-next">—</span><span class="tick" id="k-next"></span></section>
+  <section class="card then empty" id="c-then"><span class="label">THEN</span><span class="time" id="t-then"></span><span class="who" id="w-then">—</span><span class="tick" id="k-then"></span></section>
+</main>
+
+<section id="session">
+  <div class="s-who">IN THE CHAIR <b id="s-who"></b><span id="s-slot"></span></div>
+  <div class="timer" id="timer">15:00</div>
+  <div class="s-next" id="s-next"></div>
+  <div class="actions"><button class="b-ghost" id="b-undo">Undo start</button><button class="b-primary" id="b-finish">Finish · show next</button></div>
+</section>
+
+<section id="noday">
+  <div class="kd">KnuckleDown</div>
+  <div class="k-big">No session is set for today</div>
+  <div class="box" style="width:min(520px,100%);text-align:left">
+    <label>Venue<select id="nd-venue"></select></label>
+    <div class="grid2"><label>From<input type="time" id="nd-start" step="300"></label><label>Until<input type="time" id="nd-end" step="300"></label></div>
+    <button class="b-primary" id="nd-go">Start today's session</button>
+    <div class="msg" id="nd-msg"></div>
+  </div>
+</section>
+
+<footer>
+  <div class="foot-left">
+    <button class="b-small" id="b-signin">Client sign-in</button>
+    <button class="b-small" id="b-list">List</button>
+    <button class="b-small" id="b-cover">Cover screen</button>
+    <button class="b-small" id="b-setup">Set-up</button>
+  </div>
+  <div class="status" id="status"><span class="dot"></span><span id="status-text">Connecting…</span></div>
+  <div class="stats" id="stats"></div>
+</footer>
+<div class="banner" id="banner"></div>
+
+<!-- person options -->
+<dialog id="dlg"><h2 id="dlg-title"></h2><p id="dlg-text"></p><div class="actions" id="dlg-actions"></div></dialog>
+<!-- add someone to a free slot -->
+<dialog id="add"><h2 id="add-title">Add to the list</h2><p>Initials only.</p>
+  <input id="add-ini" maxlength="3" autocapitalize="characters" autocomplete="off" autocorrect="off" spellcheck="false" aria-label="Initials">
+  <div class="msg" id="add-msg"></div>
+  <div class="actions"><button class="b-ghost" id="add-no">Cancel</button><button class="b-primary" id="add-yes">Add</button></div></dialog>
+
+<!-- the whole day -->
+<div class="layer" id="list"><div class="top"><h1 id="list-title">Today</h1><button class="b-small" id="list-close">Back to board</button></div><div class="scroll" id="list-rows"></div></div>
+
+<!-- cover -->
+<div class="layer" id="cover"><div class="kd">KnuckleDown</div><div>Thanks, one moment.</div><div style="font-size:13px;opacity:.6">Kenn: press and hold to return</div></div>
+
+<!-- client sign-in -->
+<div class="layer" id="kiosk">
+  <div class="top"><div class="kd">KnuckleDown</div><button class="hold" id="k-hold">Kenn: press and hold to return</button></div>
+  <div class="k-mid" id="k-mid"></div>
+</div>
+
+<!-- wellbeing form, framed from the Mac -->
+<div class="layer" id="form-view">
+  <div id="form-bar"><span id="form-msg">Wellbeing screen</span><button class="hold" id="form-hold">Kenn: press and hold to return</button></div>
+  <div id="form-slot"><div id="form-fail"><p class="k-sub">Can't reach the form on the Mac. Check Wi-Fi and Tailscale, or use a paper form and mark it screened.</p>
+    <div class="actions"><button class="b-primary" id="fail-retry">Try again</button><button class="b-ghost" id="fail-back">Carry on without it</button></div></div></div>
+</div>
+
+<!-- set-up -->
+<div class="layer" id="setup"><div class="top"><h1>Set-up</h1><button class="b-small" id="setup-close">Back to board</button></div><div class="scroll" id="setup-body"></div></div>
+
+<!-- sign-in for Kenn -->
+<div class="layer" id="login"><form class="box" id="login-form">
+  <div class="kd">KnuckleDown</div><h2>Sign in to Sessions</h2>
+  <label>Email<input type="email" id="li-email" autocomplete="username" required></label>
+  <label>Password<input type="password" id="li-pass" autocomplete="current-password" required></label>
+  <button class="b-primary" type="submit" id="li-go">Sign in</button>
+  <div class="msg" id="li-msg"></div>
+</form></div>
+
+<script src="sessions-config.js"></script>
+<script src="vendor/supabase.js"></script>
+<script src="vendor/qrcode.js"></script>
+<script>
+(() => {
+  const $ = id => document.getElementById(id);
+  const qs = new URLSearchParams(location.search);
+  const DEMO = qs.get('demo') === '1';
+  const POLL_MS = 5000, STALE_MS = 30000;
+  const pad = n => String(n).padStart(2, '0');
+  const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  const toMin = t => +t.slice(0, 2) * 60 + +t.slice(3, 5);
+  const hm = m => pad(Math.floor(m / 60) % 24) + ':' + pad(m % 60);
+  const T = t => (t || '').slice(0, 5);
+  const fmtParts = new Intl.DateTimeFormat('en-GB', { timeZone: KD.tz, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' });
+  // "Now" is always Glasgow time, whatever the device thinks.
+  function lon() { const p = {}; fmtParts.formatToParts(new Date()).forEach(x => p[x.type] = x.value); return { day: `${p.year}-${p.month}-${p.day}`, min: +p.hour * 60 + +p.minute, hm: `${p.hour}:${p.minute}` }; }
+  const niceDay = d => new Date(d + 'T12:00:00Z').toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', timeZone: 'UTC' });
+  const store = { get(k, d) { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : d; } catch (_) { return d; } }, set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (_) {} } };
+
+  // ---- data: the real database, or an in-memory sample for ?demo=1 --------
+  function realDB() {
+    const sb = supabase.createClient(KD.url, KD.key);
+    const q = async p => { const { data, error } = await p; if (error) throw error; return data; };
+    return {
+      session: async () => (await sb.auth.getSession()).data.session,
+      signIn: (email, password) => q(sb.auth.signInWithPassword({ email, password })),
+      signOut: () => sb.auth.signOut(),
+      venues: () => q(sb.from('sess_venues').select('*').order('name')),
+      days: from => q(sb.from('sess_days').select('*').gte('day', from).order('day').order('start_time')),
+      slots: dayId => q(sb.from('sess_slots').select('*').eq('day_id', dayId).neq('status', 'cancelled').order('slot_time')),
+      addSlot: r => q(sb.from('sess_slots').insert(r).select().single()),
+      updSlot: (id, p) => q(sb.from('sess_slots').update(p).eq('id', id).select().single()),
+      addDay: r => q(sb.from('sess_days').insert(r).select().single()),
+      delDay: id => q(sb.from('sess_days').delete().eq('id', id)),
+      addVenue: r => q(sb.from('sess_venues').insert(r).select().single()),
+      updVenue: (id, p) => q(sb.from('sess_venues').update(p).eq('id', id).select().single())
+    };
+  }
+  function demoDB() {
+    let n = 0; const id = () => 'demo-' + (++n);
+    const L = lon(), start = Math.max(0, Math.floor((L.min - 40) / 20) * 20);
+    const venues = [{ id: 'v1', slug: 'demo', name: 'Demo venue', blurb: 'Sample', where_text: '', price_pence: 1500, pay_url: 'https://example.com/pay', form_url: null, session_min: 15, slot_min: 20, active: true }];
+    const days = [{ id: 'd1', venue_id: 'v1', day: L.day, start_time: hm(start) + ':00', end_time: hm(Math.min(start + 240, 1439)) + ':00' }];
+    const mk = (i, ini, status, extra) => Object.assign({ id: id(), day_id: 'd1', slot_time: hm(start + i * 20) + ':00', initials: ini, status, screened: false, paid: false, source: 'page', started_at: null, ended_at: null }, extra);
+    const slots = [mk(0, 'AB', 'done', { screened: true, paid: true }), mk(1, 'CD', 'now', { screened: true, paid: true, started_at: new Date(Date.now() - 6 * 60000).toISOString() }), mk(2, 'EF', 'waiting', { screened: true }), mk(4, 'GH', 'waiting')];
+    const ok = v => Promise.resolve(JSON.parse(JSON.stringify(v)));
+    return {
+      session: () => ok({ user: { email: 'demo' } }), signIn: () => ok({}), signOut: () => ok({}),
+      venues: () => ok(venues), days: from => ok(days.filter(d => d.day >= from)),
+      slots: dayId => ok(slots.filter(s => s.day_id === dayId && s.status !== 'cancelled').sort((a, b) => a.slot_time.localeCompare(b.slot_time))),
+      addSlot: r => { if (slots.some(s => s.day_id === r.day_id && T(s.slot_time) === T(r.slot_time) && s.status !== 'cancelled')) return Promise.reject({ code: '23505' });
+        const s = Object.assign({ id: id(), status: 'waiting', screened: false, paid: false, started_at: null, ended_at: null }, r); slots.push(s); return ok(s); },
+      updSlot: (i, p) => { const s = slots.find(x => x.id === i); Object.assign(s, p); return ok(s); },
+      addDay: r => { const d = Object.assign({ id: id() }, r); days.push(d); return ok(d); },
+      delDay: i => { const k = days.findIndex(d => d.id === i); if (k >= 0) days.splice(k, 1); return ok(null); },
+      addVenue: r => { const v = Object.assign({ id: id(), session_min: 15, slot_min: 20, price_pence: 0, blurb: '', where_text: '', active: true }, r); venues.push(v); return ok(v); },
+      updVenue: (i, p) => { const v = venues.find(x => x.id === i); Object.assign(v, p); return ok(v); }
+    };
+  }
+  const DB = DEMO ? demoDB() : realDB();
+
+  // ---- state ---------------------------------------------------------------
+  const S = { venues: [], days: [], dayId: null, slots: [], lastOk: 0, err: '', signedIn: false, today: lon().day };
+  let outbox = DEMO ? [] : store.get('kd-sess-outbox', []);     // slot changes not yet saved
+  const cache = DEMO ? {} : store.get('kd-sess-cache', {});      // last board, so a reload offline still shows it
+  const day = () => S.days.find(d => d.id === S.dayId) || null;
+  const venueOf = d => d ? S.venues.find(v => v.id === d.venue_id) || null : null;
+  const venue = () => venueOf(day());
+  const slotTimes = (d, v) => { const out = [], a = toMin(d.start_time), b = toMin(d.end_time); for (let m = a; m + v.session_min <= b; m += v.slot_min) out.push(hm(m)); return out; };
+  const live = () => S.slots.filter(s => s.status !== 'cancelled').sort((a, b) => a.slot_time.localeCompare(b.slot_time));
+  function queue() {
+    const all = live(), now = all.find(s => s.status === 'now') || null, waiting = all.filter(s => s.status === 'waiting');
+    return { now, next: waiting[0] || null, then: waiting[1] || null, waiting,
+      counts: { done: all.filter(s => s.status === 'done').length, noshow: all.filter(s => s.status === 'noshow').length, waiting: waiting.length } };
+  }
+  function nextFree() { const d = day(), v = venue(); if (!d || !v) return null; const L = lon(), taken = new Set(live().map(s => T(s.slot_time)));
+    return slotTimes(d, v).find(t => !taken.has(t) && (d.day > L.day || toMin(t) + v.session_min > L.min)) || null; }
+
+  // ---- loading: always today's list ----------------------------------------
+  function pickDay() {
+    const L = lon(), todays = S.days.filter(d => d.day === L.day);
+    const chosen = store.get('kd-sess-day', null);
+    let d = chosen && chosen.day === L.day ? todays.find(x => x.id === chosen.id) : null;
+    if (!d) d = todays.find(x => toMin(x.start_time) - 60 <= L.min && L.min <= toMin(x.end_time) + 60) || todays.find(x => L.min <= toMin(x.end_time)) || todays[0] || null;
+    if ((d && d.id) !== S.dayId) { S.dayId = d ? d.id : null; S.slots = []; }
+  }
+  async function loadBase() {
+    const L = lon(); S.today = L.day;
+    const [venues, days] = await Promise.all([DB.venues(), DB.days(L.day)]);
+    S.venues = venues; S.days = days; pickDay();
+  }
+  let polling = false, baseAt = 0;
+  async function poll(force) {
+    if (polling || !S.signedIn) return; polling = true;
+    try {
+      const L = lon();
+      if (force || L.day !== S.today || Date.now() - baseAt > 60000) { await loadBase(); baseAt = Date.now(); }
+      if (S.dayId) { const rows = await DB.slots(S.dayId); S.slots = rows; outbox.forEach(o => applyLocal(o.id, o.patch)); }
+      S.lastOk = Date.now(); S.err = '';
+      store.set('kd-sess-cache', { venues: S.venues, days: S.days, dayId: S.dayId, slots: S.slots, at: S.lastOk, today: S.today });
+      flush();
+    } catch (e) {
+      S.err = /Failed to fetch|NetworkError|Load failed/i.test(e.message || '') ? 'no connection' : (e.message || 'error');
+      if (/JWT|401|not authorized/i.test(e.message || '')) checkSession();
+    } finally { polling = false; render(); }
+  }
+
+  // ---- saving changes: shown at once, sent in order, retried until saved ----
+  function applyLocal(id, patch) { const s = S.slots.find(x => x.id === id); if (s) Object.assign(s, patch); }
+  function upd(id, patch) { applyLocal(id, patch); outbox.push({ id, patch }); store.set('kd-sess-outbox', outbox); render(); flush(); }
+  let flushing = false;
+  async function flush() {
+    if (flushing) return; flushing = true;
+    try { while (outbox.length && S.signedIn) {
+        try { await DB.updSlot(outbox[0].id, outbox[0].patch); }
+        catch (e) { // a change the database will never accept (the row has gone) is dropped; anything else waits and retries
+          const gone = e && (e.code === 'PGRST116' || /^2[23]/.test(e.code || '')); if (!gone || !(await DB.session())) throw e; }
+        outbox.shift(); store.set('kd-sess-outbox', outbox); } }
+    catch (e) { /* stays in the outbox; the next poll tries again */ }
+    finally { flushing = false; render(); }
+  }
+  async function addSlot(time, initials, source) {
+    const ini = (initials || '').toUpperCase().replace(/[^A-Z]/g, '').slice(0, 3);
+    if (!ini) throw new Error('Type initials first.');
+    try { const s = await DB.addSlot({ day_id: S.dayId, slot_time: time, initials: ini, source }); S.slots.push(s); render(); return s; }
+    catch (e) { if (e && e.code === '23505') throw new Error('That time has just been taken. Pick another.'); throw new Error('Could not save. Check the connection and try again.'); }
+  }
+  function start(slot) { const q = queue(); if (q.now && q.now.id !== slot.id) upd(q.now.id, { status: 'done', ended_at: new Date().toISOString() });
+    upd(slot.id, { status: 'now', started_at: new Date().toISOString(), ended_at: null }); }
+  const finish = slot => upd(slot.id, { status: 'done', ended_at: new Date().toISOString() });
+
+  // ---- board ----------------------------------------------------------------
+  function ticks(s) { const v = venue(); if (!s || !v) return '';
+    const parts = [`<span class="${s.screened ? 'y' : 'n'}">${s.screened ? '✓ screened' : 'not screened'}</span>`];
+    if (v.price_pence > 0) parts.push(`<span class="${s.paid ? 'y' : 'n'}">${s.paid ? '✓ paid' : 'not paid'}</span>`);
+    return parts.join('<br>'); }
+  function put(key, slot, emptyText, emptyTime) {
+    $('t-' + key).textContent = slot ? T(slot.slot_time) : (emptyTime || '');
+    $('w-' + key).textContent = slot ? slot.initials : emptyText;
+    $('c-' + key).classList.toggle('empty', !slot);
+    $('k-' + key).innerHTML = ticks(slot);
+  }
+  function render() {
+    const L = lon(); $('clock').textContent = L.hm;
+    const d = day(), v = venue(), q = queue(), free = nextFree();
+    document.body.classList.toggle('no-day', S.signedIn && !d && !!S.lastOk);
+    $('title').innerHTML = (DEMO ? '<span class="demo-tag">DEMO</span> · ' : '') + (d && v ? `${esc(v.name)} · ${esc(niceDay(d.day))} · ${T(d.start_time)}–${T(d.end_time)}` : 'KnuckleDown Sessions');
+    if (d) {
+      put('now', q.now, 'nobody yet');
+      put('next', q.next, free && !q.next ? 'Free. Tap to sign in' : '—', free && !q.next ? free : '');
+      put('then', q.then, free && q.next && !q.then ? 'Free. Tap to sign in' : '—', free && q.next && !q.then ? free : '');
+      $('stats').textContent = `${q.counts.done} done · ${q.counts.waiting} waiting` + (q.counts.noshow ? ` · ${q.counts.noshow} no-show` : '');
+    } else $('stats').textContent = '';
+    renderSession(q, v);
+    const age = S.lastOk ? Date.now() - S.lastOk : Infinity, st = $('status'), tx = $('status-text');
+    document.body.classList.toggle('stale', !!S.lastOk && age > STALE_MS);
+    if (!S.lastOk) { st.className = S.err ? 'status bad' : 'status'; tx.textContent = S.err ? 'Not connected' : 'Connecting…'; }
+    else if (age > STALE_MS) { st.className = 'status bad'; tx.textContent = 'Not updated since ' + new Date(S.lastOk).toLocaleTimeString('en-GB', { timeZone: KD.tz }); }
+    else if (outbox.length) { st.className = 'status stale'; tx.textContent = `Saving ${outbox.length} change${outbox.length > 1 ? 's' : ''}…`; }
+    else { st.className = 'status ok'; tx.textContent = DEMO ? 'Demo data' : 'Live'; }
+    const b = $('banner');
+    if (S.err && S.lastOk && age > STALE_MS) { b.textContent = `Connection lost (${S.err}). Showing the board as it was. Changes are kept and sent when it returns.`; b.classList.add('show'); }
+    else b.classList.remove('show');
+    if ($('list').classList.contains('show')) renderList();
+  }
+  function renderSession(q, v) {
+    const s = q.now; document.body.classList.toggle('in-session', !!s && !!v);
+    if (!s || !v) return;
+    const startMs = s.started_at ? Date.parse(s.started_at) : Date.now(), left = startMs + v.session_min * 60000 - Date.now(), t = $('timer');
+    $('s-who').textContent = s.initials; $('s-slot').textContent = T(s.slot_time) + ' slot';
+    const nx = q.next, bar = $('s-next');
+    bar.innerHTML = nx ? `NEXT <b>${esc(nx.initials)}</b> ${T(nx.slot_time)} <span class="tick">${ticks(nx).replace('<br>', ' · ')}</span>` : 'NEXT <b>—</b> nobody waiting';
+    bar.style.display = left > 0 ? '' : 'none';
+    if (left > 0) { const m = Math.floor(left / 60000), sec = Math.floor(left % 60000 / 1000); t.className = 'timer' + (left <= 120000 ? ' soon' : ''); t.textContent = m + ':' + pad(sec); }
+    else { const m = Math.floor(-left / 60000); t.className = 'timer over';
+      t.innerHTML = (nx ? `Next: ${esc(nx.initials)}` : "Time's up") + `<small>${nx ? T(nx.slot_time) + ' · ' : ''}time's up${m ? ' ' + m + ' min ago' : ''}</small>`; }
+  }
+
+  // ---- person options -------------------------------------------------------
+  function person(slot) {
+    if (!slot) return; const v = venue(), q = queue(), acts = [], dlg = $('dlg');
+    const b = (label, fn, primary) => acts.push({ label, fn, primary });
+    $('dlg-title').textContent = `${slot.initials} · ${T(slot.slot_time)}`;
+    $('dlg-text').textContent = { waiting: 'Waiting.', now: 'In the chair now.', done: 'Done.', noshow: 'Marked as no-show.' }[slot.status] || '';
+    if (slot.status === 'waiting') b(`Start ${v.session_min} min`, () => start(slot), true);
+    if (slot.status === 'now') b('Finish', () => finish(slot), true);
+    if (v.form_url && !slot.screened) b('Wellbeing form', () => openForm(slot, null));
+    b(slot.screened ? 'Clear screened' : 'Mark screened (paper)', () => upd(slot.id, { screened: !slot.screened }));
+    if (v.price_pence > 0) { if (v.pay_url && !slot.paid) b('Show pay code', () => kiosk('pay', slot)); b(slot.paid ? 'Clear paid' : 'Mark paid', () => upd(slot.id, { paid: !slot.paid })); }
+    if (slot.status === 'waiting') b('No-show', () => upd(slot.id, { status: 'noshow' }));
+    if (slot.status === 'done' || slot.status === 'noshow' || slot.status === 'now') b('Back to waiting', () => upd(slot.id, { status: 'waiting', started_at: null, ended_at: null }));
+    if (slot.status !== 'now') b('Remove from list', () => upd(slot.id, { status: 'cancelled' }));
+    b('Close', () => {});
+    const box = $('dlg-actions'); box.replaceChildren(...acts.map(a => { const el = document.createElement('button'); el.textContent = a.label; el.className = a.primary ? 'b-primary' : 'b-ghost'; el.onclick = () => { dlg.close(); a.fn(); }; return el; }));
+    if (!dlg.open) dlg.showModal();
+  }
+  let addTime = null;
+  function askAdd(time) { addTime = time; $('add-title').textContent = `Add to ${time}`; $('add-ini').value = ''; $('add-msg').textContent = ''; $('add').showModal(); setTimeout(() => $('add-ini').focus(), 50); }
+  $('add-no').onclick = () => $('add').close();
+  $('add-yes').onclick = async () => { try { await addSlot(addTime, $('add-ini').value, 'kenn'); $('add').close(); } catch (e) { $('add-msg').textContent = e.message; } };
+  $('add-ini').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); $('add-yes').click(); } });
+  const cardTap = key => () => { if (!day()) return; const s = queue()[key]; if (s) person(s); else if (nextFree()) kiosk('pick'); };
+  $('c-now').onclick = cardTap('now'); $('c-next').onclick = cardTap('next'); $('c-then').onclick = cardTap('then');
+  $('s-next').onclick = () => { const s = queue().next; if (s) person(s); };
+  $('b-finish').onclick = () => { const s = queue().now; if (s) finish(s); };
+  $('b-undo').onclick = () => { const s = queue().now; if (s) upd(s.id, { status: 'waiting', started_at: null }); };
+
+  // ---- the whole day ----------------------------------------------------------
+  function renderList() {
+    const d = day(), v = venue(); if (!d || !v) { $('list-rows').innerHTML = '<p class="k-sub">No session today.</p>'; return; }
+    $('list-title').textContent = `${v.name} · ${niceDay(d.day)}`;
+    const L = lon(), by = {}; live().forEach(s => by[T(s.slot_time)] = s);
+    const times = [...new Set(slotTimes(d, v).concat(Object.keys(by)))].sort();
+    $('list-rows').innerHTML = times.map(t => { const s = by[t], past = d.day === L.day && toMin(t) + v.session_min < L.min;
+      if (!s) return `<div class="row free${past ? ' past' : ''}" data-free="${t}"><span class="t">${t}</span><span>free</span><span class="s">tap to add</span></div>`;
+      const st = { waiting: 'waiting', now: 'in the chair', done: 'done', noshow: 'no-show' }[s.status];
+      return `<div class="row is-${s.status}" data-id="${esc(s.id)}"><span class="t">${t}</span><span class="w">${esc(s.initials)}</span><span>${st}</span><span class="s">${s.screened ? '✓ screened' : 'not screened'}${v.price_pence > 0 ? (s.paid ? ' · ✓ paid' : ' · not paid') : ''}</span></div>`; }).join('');
+  }
+  $('list-rows').onclick = e => { const r = e.target.closest('.row'); if (!r) return; if (r.dataset.free) askAdd(r.dataset.free); else person(S.slots.find(s => s.id === r.dataset.id)); };
+  $('b-list').onclick = () => { renderList(); $('list').classList.add('show'); };
+  $('list-close').onclick = () => $('list').classList.remove('show');
+
+  // ---- press and hold: a tap by a client does nothing -------------------------
+  function holdable(el, fn) { let t = null;
+    el.addEventListener('pointerdown', e => { e.preventDefault(); el.classList.add('holding'); t = setTimeout(() => { el.classList.remove('holding'); fn(); }, 1200); });
+    ['pointerup', 'pointerleave', 'pointercancel'].forEach(ev => el.addEventListener(ev, () => { clearTimeout(t); el.classList.remove('holding'); })); }
+  $('b-cover').onclick = () => $('cover').classList.add('show');
+  holdable($('cover'), () => $('cover').classList.remove('show'));
+
+  // ---- client sign-in: pick a time, initials, form, pay -----------------------
+  const K = { step: null, slot: null, time: null };
+  function kiosk(step, slot) { K.step = step; K.slot = slot || null; K.time = null; $('kiosk').classList.add('show'); renderKiosk(); }
+  const closeKiosk = () => { $('kiosk').classList.remove('show'); K.step = null; render(); };
+  holdable($('k-hold'), closeKiosk);
+  function afterForm() { const v = venue(), s = K.slot && S.slots.find(x => x.id === K.slot.id);
+    if (s && v && v.price_pence > 0 && v.pay_url && !s.paid) { K.step = 'pay'; $('kiosk').classList.add('show'); renderKiosk(); } else if ($('kiosk').classList.contains('show')) { K.step = 'done'; renderKiosk(); } }
+  function renderKiosk() {
+    const d = day(), v = venue(), mid = $('k-mid'); if (!d || !v) return closeKiosk();
+    const price = v.price_pence > 0 ? '£' + (v.price_pence / 100).toFixed(v.price_pence % 100 ? 2 : 0) : '';
+    if (K.step === 'pick') {
+      const L = lon(), taken = new Set(live().map(s => T(s.slot_time))), nf = nextFree();
+      const cells = slotTimes(d, v).filter(t => toMin(t) + v.session_min > L.min).map(t => taken.has(t) ? `<button class="k-slot x" disabled>${t}<small>taken</small></button>`
+        : `<button class="k-slot${t === nf ? ' pick' : ''}" data-t="${t}">${t}<small>${t === nf ? 'next free' : 'free'}</small></button>`).join('');
+      mid.innerHTML = `<div class="k-big">Pick a time for your ${v.session_min}-minute massage</div><div class="k-slots">${cells || '<p class="k-sub">No times left today.</p>'}</div><div class="k-sub">Booked already? Tell Kenn your time.</div>`;
+      mid.querySelectorAll('[data-t]').forEach(b => b.onclick = () => { K.time = b.dataset.t; K.step = 'ini'; renderKiosk(); });
+    } else if (K.step === 'ini') {
+      mid.innerHTML = `<div class="k-big">${K.time}. Your initials?</div><input id="k-ini" maxlength="3" autocapitalize="characters" autocomplete="off" autocorrect="off" spellcheck="false" aria-label="Your initials"><div class="msg" id="k-msg"></div>
+        <div class="actions"><button class="b-ghost" id="k-back">Back</button><button class="b-primary" id="k-go">Continue</button></div>`;
+      const go = async () => { $('k-go').disabled = true;
+        try { K.slot = await addSlot(K.time, $('k-ini').value, 'ipad'); if (v.form_url) openForm(K.slot, afterForm); else afterForm(); }
+        catch (e) { $('k-msg').textContent = e.message; $('k-go').disabled = false; if (/taken/.test(e.message)) { await poll(); K.step = 'pick'; setTimeout(renderKiosk, 1200); } } };
+      $('k-go').onclick = go; $('k-back').onclick = () => { K.step = 'pick'; renderKiosk(); };
+      $('k-ini').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); go(); } });
+      setTimeout(() => $('k-ini') && $('k-ini').focus(), 50);
+    } else if (K.step === 'pay') {
+      const s = K.slot; const qr = qrcode(0, 'M'); qr.addData(v.pay_url); qr.make();
+      mid.innerHTML = `<div class="price">${price} <small>${v.session_min} minutes · ${T(s.slot_time)}</small></div><div class="qr">${qr.createSvgTag({ cellSize: 8, margin: 2, scalable: true })}</div>
+        <div class="k-sub">Point your phone camera at the code and pay. Then show Kenn the confirmation screen.</div>
+        <div class="actions"><button class="hold" id="k-paid">Kenn: hold to confirm paid</button><button class="hold" id="k-later">Kenn: hold for pay later</button></div>`;
+      holdable($('k-paid'), () => { upd(s.id, { paid: true }); K.step = 'done'; renderKiosk(); });
+      holdable($('k-later'), () => { K.step = 'done'; renderKiosk(); });
+    } else if (K.step === 'done') {
+      const s = K.slot; mid.innerHTML = `<div class="k-big">You're in${s ? ' for ' + T(s.slot_time) : ''}.</div><div class="k-sub">Please hand the iPad back to Kenn.</div>`;
+    }
+  }
+  $('b-signin').onclick = () => { if (day()) kiosk('pick'); };
+
+  // ---- wellbeing form, framed from the Mac (same three words as before) -------
+  let frame = null, formSlot = null, formDone = null, formSaved = false, readyT = null;
+  function removeFrame() { clearTimeout(readyT); if (frame) { frame.remove(); frame = null; } }
+  function closeForm() { const cb = formDone; removeFrame(); $('form-view').classList.remove('show'); $('form-fail').classList.remove('show'); formDone = null; if (cb) cb(); else render(); }
+  function openForm(slot, done) {
+    const v = venue(); if (!v || !v.form_url) { if (done) done(); return; }
+    removeFrame(); formSlot = slot; formDone = done; formSaved = false;
+    $('form-msg').textContent = 'Wellbeing screen'; $('form-fail').classList.remove('show');
+    frame = document.createElement('iframe'); frame.title = 'Wellbeing screen'; frame.referrerPolicy = 'no-referrer';
+    frame.src = v.form_url + (v.form_url.includes('?') ? '&' : '?') + 'hud=1';
+    $('form-slot').appendChild(frame); $('form-view').classList.add('show');
+    readyT = setTimeout(() => $('form-fail').classList.add('show'), 8000);
+  }
+  window.addEventListener('message', e => {
+    const v = venue(); if (!frame || e.source !== frame.contentWindow || !v || !v.form_url) return;
+    let origin = ''; try { origin = new URL(v.form_url).origin; } catch (_) {} if (e.origin !== origin) return;
+    const ev = e.data && e.data.kdHud;
+    if (ev === 'ready') { clearTimeout(readyT); $('form-fail').classList.remove('show'); }
+    if (ev === 'saved') { formSaved = true; if (formSlot) upd(formSlot.id, { screened: true }); $('form-msg').textContent = 'Saved. Kenn: tap Next client, or press and hold, to carry on.'; }
+    if (ev === 'next') closeForm();
+  });
+  holdable($('form-hold'), closeForm);
+  $('fail-retry').onclick = () => openForm(formSlot, formDone);
+  $('fail-back').onclick = closeForm;
+
+  // ---- set-up: venues and days -------------------------------------------------
+  const pageLink = v => new URL('v.html?v=' + encodeURIComponent(v.slug), location.href).href;
+  function renderSetup(msg) {
+    const L = lon(), vopts = S.venues.map(v => `<option value="${esc(v.id)}">${esc(v.name)}</option>`).join('');
+    const days = S.days.map(d => { const v = venueOf(d), on = d.id === S.dayId;
+      return `<div class="line"><span>${esc(niceDay(d.day))} · ${esc(v ? v.name : '?')} <small>${T(d.start_time)}–${T(d.end_time)}${on ? ' · on the board now' : ''}</small></span>
+        <span>${d.day === L.day && !on ? `<button class="b-small" data-use="${esc(d.id)}">Use now</button> ` : ''}<button class="b-small" data-del="${esc(d.id)}">Remove</button></span></div>`; }).join('') || '<p class="k-sub">No days set yet.</p>';
+    const venues = S.venues.map(v => `<details class="box"><summary class="line"><span>${esc(v.name)} <small>${v.price_pence > 0 ? '£' + (v.price_pence / 100).toFixed(2) : 'free'} · ${v.session_min} min in ${v.slot_min}-min slots</small></span></summary>
+      <form data-venue="${esc(v.id)}" style="display:grid;gap:10px">
+        <label>Name<input name="name" value="${esc(v.name)}" required></label>
+        <div class="grid2"><label>Price (£, 0 for free)<input name="price" type="number" min="0" step="0.5" value="${(v.price_pence / 100)}"></label>
+          <label>Minutes in the chair<input name="session_min" type="number" min="5" max="90" value="${v.session_min}"></label>
+          <label>Slot length (minutes)<input name="slot_min" type="number" min="5" max="120" value="${v.slot_min}"></label></div>
+        <label>Stripe payment link (shown as the QR code)<input name="pay_url" type="url" value="${esc(v.pay_url || '')}" placeholder="https://buy.stripe.com/…"></label>
+        <label>Wellbeing form address on the Mac<input name="form_url" type="url" value="${esc(v.form_url || '')}" placeholder="https://…ts.net/kd/screen?site=…"></label>
+        <label>What it is (shown on the public page)<textarea name="blurb" rows="2">${esc(v.blurb)}</textarea></label>
+        <label>Where to find you<input name="where_text" value="${esc(v.where_text)}"></label>
+        <div class="line"><span class="link">${esc(pageLink(v))}</span><button class="b-small" type="button" data-copy="${esc(pageLink(v))}">Copy page link</button></div>
+        <button class="b-primary" type="submit">Save ${esc(v.name)}</button></form></details>`).join('');
+    $('setup-body').innerHTML = `<div class="msg">${esc(msg || '')}</div>
+      <div class="box"><h2>Session days</h2>${days}
+        <form id="day-form" style="display:grid;gap:10px"><div class="grid2"><label>Venue<select name="venue">${vopts}</select></label><label>Date<input name="day" type="date" value="${L.day}" min="${L.day}" required></label>
+          <label>From<input name="start" type="time" step="300" value="18:00" required></label><label>Until<input name="end" type="time" step="300" value="21:00" required></label></div>
+          <button class="b-primary" type="submit">Add this day</button></form></div>
+      <h2 style="font-size:18px">Venues</h2>${venues}
+      <form class="box" id="venue-form"><h2>Add a venue</h2><label>Name<input name="name" required placeholder="Venue name"></label><button class="b-ghost" type="submit">Add venue</button></form>
+      <div class="box"><div class="line"><span>Signed in <small id="who"></small></span><button class="b-small" id="b-out">Sign out</button></div></div>`;
+    $('b-out').onclick = async () => { await DB.signOut(); location.reload(); };
+  }
+  const openSetup = () => { renderSetup(); $('setup').classList.add('show'); };
+  $('b-setup').onclick = openSetup; $('setup-close').onclick = () => $('setup').classList.remove('show');
+  $('setup-body').addEventListener('click', async e => {
+    const t = e.target.closest('button'); if (!t) return;
+    try {
+      if (t.dataset.del) { const d = S.days.find(x => x.id === t.dataset.del); const n = d && d.id === S.dayId ? live().length : 0;
+        if (n && t.dataset.sure !== '1') { t.dataset.sure = '1'; t.textContent = `Remove and lose ${n} on the list?`; return; }
+        await DB.delDay(t.dataset.del); await poll(true); renderSetup('Day removed.'); }
+      if (t.dataset.use) { store.set('kd-sess-day', { day: lon().day, id: t.dataset.use }); await poll(true); renderSetup('Board switched.'); }
+      if (t.dataset.copy) { try { await navigator.clipboard.writeText(t.dataset.copy); t.textContent = 'Copied'; } catch (_) { t.textContent = 'Press and hold the link to copy'; } }
+    } catch (err) { renderSetup('Could not save: ' + (err.message || 'check the connection')); }
+  });
+  $('setup-body').addEventListener('submit', async e => {
+    e.preventDefault(); const f = e.target, v = Object.fromEntries(new FormData(f));
+    try {
+      if (f.id === 'day-form') { if (v.end <= v.start) return renderSetup('Until must be later than From.');
+        await DB.addDay({ venue_id: v.venue, day: v.day, start_time: v.start, end_time: v.end }); await poll(true); renderSetup('Day added.'); }
+      else if (f.id === 'venue-form') { const slug = v.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40) || 'venue';
+        await DB.addVenue({ name: v.name.trim(), slug }); await poll(true); renderSetup('Venue added. Open it below to set the price and links.'); }
+      else if (f.dataset.venue) { if (+v.slot_min < +v.session_min) return renderSetup('The slot must be at least as long as the time in the chair.');
+        await DB.updVenue(f.dataset.venue, { name: v.name.trim(), price_pence: Math.round((+v.price || 0) * 100), session_min: +v.session_min, slot_min: +v.slot_min,
+          pay_url: v.pay_url.trim() || null, form_url: v.form_url.trim() || null, blurb: v.blurb.trim(), where_text: v.where_text.trim() }); await poll(true); renderSetup('Saved.'); }
+    } catch (err) { renderSetup(err && err.code === '23505' ? 'That already exists (same venue and date, or same venue name).' : 'Could not save: ' + (err.message || 'check the connection')); }
+  });
+
+  // ---- no session today: start one from here ---------------------------------
+  function renderNoDay() { const sel = $('nd-venue'); if (sel.options.length !== S.venues.length) sel.innerHTML = S.venues.map(v => `<option value="${esc(v.id)}">${esc(v.name)}</option>`).join('');
+    if (!$('nd-start').value) { const L = lon(), a = Math.floor(L.min / 20) * 20; $('nd-start').value = hm(a); $('nd-end').value = hm(Math.min(a + 180, 23 * 60 + 55)); } }
+  $('nd-go').onclick = async () => { const s = $('nd-start').value, e = $('nd-end').value; if (!s || !e || e <= s) { $('nd-msg').textContent = 'Until must be later than From.'; return; }
+    try { await DB.addDay({ venue_id: $('nd-venue').value, day: lon().day, start_time: s, end_time: e }); $('nd-msg').textContent = ''; await poll(true); }
+    catch (err) { $('nd-msg').textContent = err && err.code === '23505' ? 'That venue already has a session today. Open Set-up to use it.' : 'Could not save. Check the connection.'; } };
+
+  // ---- sign-in and start-up -----------------------------------------------------
+  async function checkSession() { let s = null; try { s = await DB.session(); } catch (_) {} S.signedIn = !!s; $('login').classList.toggle('show', !s); return s; }
+  $('login-form').onsubmit = async e => { e.preventDefault(); $('li-go').disabled = true; $('li-msg').textContent = 'Signing in…';
+    try { await DB.signIn($('li-email').value.trim(), $('li-pass').value); $('li-pass').value = ''; $('li-msg').textContent = ''; await checkSession(); await poll(true); }
+    catch (err) { $('li-msg').textContent = /Invalid login/i.test(err.message || '') ? 'Wrong email or password.' : /Failed to fetch|NetworkError|Load failed/i.test(err.message || '') ? 'No connection. Check the Wi-Fi and try again.' : 'Could not sign in: ' + (err.message || 'check the connection'); }
+    finally { $('li-go').disabled = false; } };
+  async function keepAwake() { try { if ('wakeLock' in navigator) await navigator.wakeLock.request('screen'); } catch (_) {} }
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) { keepAwake(); poll(true); } });
+  window.addEventListener('online', () => poll(true));
+
+  (async () => {
+    keepAwake();
+    if (cache.today === lon().day && cache.days) { S.venues = cache.venues; S.days = cache.days; S.dayId = cache.dayId; S.slots = cache.slots || []; outbox.forEach(o => applyLocal(o.id, o.patch)); }
+    render();
+    await checkSession();
+    await poll(true);
+    setInterval(() => { render(); if (document.body.classList.contains('no-day')) renderNoDay(); }, 1000);
+    setInterval(poll, POLL_MS);
+  })();
+})();
+</script>
+</body>
+</html>
