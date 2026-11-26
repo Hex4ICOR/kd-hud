@@ -385,7 +385,7 @@
     document.body.classList.toggle('no-day', S.signedIn && !d && !!S.lastOk);
     $('title').innerHTML = (DEMO ? '<span class="demo-tag">DEMO</span> · ' : '') + (d && v ? `${esc(v.name)} · ${esc(niceDay(d.day))} · ${T(d.start_time)}–${T(d.end_time)}` : 'KnuckleDown Sessions');
     if (d) {
-      put('now', q.now, 'nobody yet');
+      put('now', q.now, q.next ? `Tap to start ${q.next.initials}` : 'nobody yet');
       put('next', q.next, free && !q.next ? 'Free. Tap to sign in' : '—', free && !q.next ? free : '');
       put('then', q.then, free && q.next && !q.then ? 'Free. Tap to sign in' : '—', free && q.next && !q.then ? free : '');
       $('stats').textContent = `${q.counts.done} done · ${q.counts.waiting} waiting` + (q.counts.noshow ? ` · ${q.counts.noshow} no-show` : '');
@@ -438,7 +438,7 @@
   $('add-no').onclick = () => $('add').close();
   $('add-yes').onclick = async () => { try { await addSlot(addTime, $('add-ini').value, 'kenn'); $('add').close(); } catch (e) { $('add-msg').textContent = e.message; } };
   $('add-ini').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); $('add-yes').click(); } });
-  const cardTap = key => () => { if (!day()) return; const s = queue()[key]; if (s) person(s); else if (nextFree()) kiosk('pick'); };
+  const cardTap = key => () => { if (!day()) return; const q = queue(), s = q[key] || (key === 'now' ? q.next : null); if (s) person(s); else if (nextFree()) kiosk('pick'); };
   $('c-now').onclick = cardTap('now'); $('c-next').onclick = cardTap('next'); $('c-then').onclick = cardTap('then');
   $('s-next').onclick = () => { const s = queue().next; if (s) person(s); };
   $('b-finish').onclick = () => { const s = queue().now; if (s) finish(s); };
@@ -499,7 +499,7 @@
       holdable($('k-paid'), () => { upd(s.id, { paid: true }); K.step = 'done'; renderKiosk(); });
       holdable($('k-later'), () => { K.step = 'done'; renderKiosk(); });
     } else if (K.step === 'done') {
-      const s = K.slot; mid.innerHTML = `<div class="k-big">You're in${s ? ' for ' + T(s.slot_time) : ''}.</div><div class="k-sub">Please hand the iPad back to Kenn.</div>`;
+      const s = K.slot; mid.innerHTML = `<div class="k-big">You're in${s ? ' for ' + T(s.slot_time) : ''}.</div><div class="k-sub">Please hand the iPad back to Kenn.</div>${v.form_url ? '' : '<div class="k-sub" style="font-size:13px;opacity:.7">Kenn: no wellbeing form address is set for this venue yet (Set-up).</div>'}`;
     }
   }
   $('b-signin').onclick = () => { if (day()) kiosk('pick'); };
