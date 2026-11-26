@@ -1,0 +1,189 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#1C1A18">
+<meta name="robots" content="noindex">
+<link rel="icon" href="icon-180.png">
+<title>KnuckleDown chair massage</title>
+<!--
+  KnuckleDown venue page: the link a venue forwards by email or WhatsApp.
+  One fixed address per venue (v.html?v=<venue>). Always shows today's list, or the next session day.
+  It reads two things from the KnuckleDown database: which times are taken, and whether the chair is busy.
+  It never receives initials or anything about anyone else. Signing up sends initials and a time, nothing more.
+  Preview with sample data: v.html?demo=1
+-->
+<style>
+  :root { --bg: #1C1A18; --panel: #2A2623; --ink: #F2EEEA; --muted: #A89E94; --now: #B85A1A; --next: #3A3632; --next-ink: #F0A868; --ok: #7BC47F; --warn: #F0A868; --done: #6F6862; }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--ink); font-family: Montserrat, -apple-system, "Segoe UI", Roboto, sans-serif; line-height: 1.45;
+    padding: max(20px, env(safe-area-inset-top)) max(18px, env(safe-area-inset-right)) max(28px, env(safe-area-inset-bottom)) max(18px, env(safe-area-inset-left)); }
+  main { max-width: 560px; margin: 0 auto; display: grid; gap: 16px; }
+  .kd { color: var(--now); font-weight: 900; font-size: 26px; letter-spacing: .04em; }
+  h1 { font-size: clamp(26px, 7vw, 36px); font-weight: 900; line-height: 1.1; text-wrap: balance; }
+  h2 { font-size: 17px; font-weight: 800; }
+  p { color: var(--muted); }
+  .facts { display: flex; flex-wrap: wrap; gap: 8px; }
+  .fact { background: var(--panel); border-radius: 999px; padding: 6px 14px; font-weight: 700; font-size: 14px; }
+  .live { border-radius: 16px; padding: 16px 18px; background: var(--panel); display: flex; gap: 12px; align-items: center; font-weight: 800; font-size: 17px; }
+  .live.busy { background: var(--now); color: #fff; }
+  .live.free { background: #24382A; color: #DDF3DE; }
+  .live small { display: block; font-weight: 600; opacity: .85; font-size: 14px; }
+  .dot { width: 12px; height: 12px; border-radius: 50%; background: currentColor; flex: none; }
+  .live.busy .dot, .live.free .dot { animation: pulse 1.6s ease-in-out infinite; }
+  @keyframes pulse { 50% { opacity: .3; } }
+  @media (prefers-reduced-motion: reduce) { .dot { animation: none !important; } }
+  .box { background: var(--panel); border-radius: 16px; padding: 18px; display: grid; gap: 12px; }
+  .slots { display: grid; grid-template-columns: repeat(auto-fill, minmax(92px, 1fr)); gap: 10px; }
+  button { font: inherit; font-weight: 800; border: 0; border-radius: 12px; padding: 14px 8px; font-size: 18px; cursor: pointer; color: var(--ink); background: var(--next); font-variant-numeric: tabular-nums; }
+  button small { display: block; font-size: 11px; font-weight: 700; color: var(--next-ink); letter-spacing: .04em; text-transform: uppercase; }
+  button:disabled { background: transparent; border: 1px dashed #3A3632; color: var(--done); cursor: default; }
+  button:disabled small { color: var(--done); }
+  button.mine { background: var(--now); color: #fff; opacity: 1; border: 0; } button.mine small { color: #fff; }
+  button.go { background: var(--now); color: #fff; padding: 16px; width: 100%; }
+  button.ghost { background: transparent; border: 1px solid #4A443F; color: var(--muted); padding: 12px; width: 100%; font-size: 15px; }
+  button:focus-visible, input:focus { outline: 3px solid var(--next-ink); outline-offset: 2px; }
+  input { font: inherit; color: var(--ink); background: var(--bg); border: 1px solid #4A443F; border-radius: 12px; padding: 12px; width: 100%;
+    text-align: center; font-weight: 900; font-size: 34px; letter-spacing: .12em; text-transform: uppercase; }
+  .msg { color: var(--warn); font-weight: 700; min-height: 1.3em; font-size: 14px; }
+  .yours { background: #24382A; color: #DDF3DE; border-radius: 16px; padding: 16px 18px; font-weight: 800; }
+  .yours small { display: block; font-weight: 600; opacity: .85; }
+  ul { list-style: none; display: grid; gap: 6px; color: var(--muted); font-weight: 600; }
+  ul b { color: var(--ink); }
+  footer { color: var(--done); font-size: 13px; text-align: center; margin-top: 8px; }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<main>
+  <div class="kd">KnuckleDown</div>
+  <h1 id="h">Seated chair massage</h1>
+  <p id="blurb"></p>
+  <div class="facts" id="facts"></div>
+  <div class="live" id="live" hidden><span class="dot"></span><span id="live-text"></span></div>
+  <div class="yours" id="yours" hidden></div>
+  <section class="box" id="book" hidden>
+    <h2 id="book-h"></h2>
+    <div class="slots" id="slots"></div>
+    <p id="book-note"></p>
+  </section>
+  <section class="box" id="ask" hidden>
+    <h2 id="ask-h"></h2>
+    <p>Your initials are all we need here. No name, no email.</p>
+    <input id="ini" maxlength="3" autocapitalize="characters" autocomplete="off" autocorrect="off" spellcheck="false" aria-label="Your initials" placeholder="AB">
+    <div class="msg" id="ask-msg" role="status"></div>
+    <button class="go" id="ask-go">Put me on the list</button>
+    <button class="ghost" id="ask-back">Back to times</button>
+  </section>
+  <section class="box" id="later" hidden><h2>Coming up</h2><ul id="later-list"></ul></section>
+  <p id="state" role="status">Loading…</p>
+  <footer>The list is live. Times shown are for the day named above. Walk-ups are welcome when the chair is free.</footer>
+</main>
+
+<script src="sessions-config.js"></script>
+<script>
+(() => {
+  const $ = id => document.getElementById(id);
+  const qs = new URLSearchParams(location.search);
+  const DEMO = qs.get('demo') === '1', slug = (qs.get('v') || '').toLowerCase();
+  const pad = n => String(n).padStart(2, '0');
+  const toMin = t => +t.slice(0, 2) * 60 + +t.slice(3, 5);
+  const hm = m => pad(Math.floor(m / 60) % 24) + ':' + pad(m % 60);
+  const niceDay = d => new Date(d + 'T12:00:00Z').toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', timeZone: 'UTC' });
+  const mineKey = 'kd-v-mine-' + slug;
+  const getMine = () => { try { return JSON.parse(localStorage.getItem(mineKey)) || null; } catch (_) { return null; } };
+  const setMine = m => { try { localStorage.setItem(mineKey, JSON.stringify(m)); } catch (_) {} };
+
+  // ---- data ---------------------------------------------------------------
+  async function rpc(fn, args) {
+    const r = await fetch(`${KD.url}/rest/v1/rpc/${fn}`, { method: 'POST', cache: 'no-store',
+      headers: { apikey: KD.key, Authorization: 'Bearer ' + KD.key, 'Content-Type': 'application/json' }, body: JSON.stringify(args) });
+    if (!r.ok) throw new Error('HTTP ' + r.status); return r.json();
+  }
+  const demo = (() => { const d = new Date(), fmt = new Intl.DateTimeFormat('en-GB', { timeZone: KD.tz, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' });
+    const p = {}; fmt.formatToParts(d).forEach(x => p[x.type] = x.value); const today = `${p.year}-${p.month}-${p.day}`, min = +p.hour * 60 + +p.minute, start = Math.max(0, Math.floor((min - 40) / 20) * 20);
+    const taken = [hm(start), hm(start + 20), hm(start + 40), hm(start + 80)];
+    return { load: async () => ({ found: true, today, now: `${p.hour}:${p.minute}:00`, venue: { name: 'Demo venue', blurb: 'A 15-minute seated acupressure massage for shoulders, arms and hands. Fully clothed, no oils, no changing.', where: 'Look for the KnuckleDown chair by reception.', price_pence: 1500, session_min: 15, slot_min: 20 },
+        day: { day: today, start: hm(start), end: hm(Math.min(start + 240, 1439)), taken: taken.slice(), waiting: 2, chair_busy: true, chair_free_in_sec: 7 * 60 }, upcoming: [{ day: today, start: hm(start), end: hm(Math.min(start + 240, 1439)) }] }),
+      join: async (day, time) => taken.includes(time) ? { ok: false, why: 'taken' } : (taken.push(time), { ok: true, time, day }) }; })();
+  const load = () => DEMO ? demo.load() : rpc('sess_public', { p_slug: slug });
+  const join = (day, time, ini) => DEMO ? demo.join(day, time) : rpc('sess_public_join', { p_slug: slug, p_day: day, p_time: time, p_initials: ini });
+
+  // ---- page ---------------------------------------------------------------
+  let D = null, picked = null, lastOk = 0, asking = false;
+  function render() {
+    if (!D) return;
+    if (!D.found) { $('h').textContent = 'This link is not in use'; $('state').textContent = 'Ask the venue for the current KnuckleDown link.'; ['live', 'book', 'ask', 'later', 'yours'].forEach(i => $(i).hidden = true); return; }
+    const v = D.venue, d = D.day, nowMin = toMin(D.now), price = v.price_pence > 0 ? '£' + (v.price_pence / 100).toFixed(v.price_pence % 100 ? 2 : 0) : '';
+    document.title = `KnuckleDown at ${v.name}`;
+    $('h').textContent = `Chair massage at ${v.name}`;
+    $('blurb').textContent = v.blurb || '';
+    const facts = [`${v.session_min} minutes`]; if (price) facts.push(price + ', pay on the day by card or phone'); if (v.where) facts.push(v.where);
+    $('facts').replaceChildren(...facts.map(f => { const s = document.createElement('span'); s.className = 'fact'; s.textContent = f; return s; }));
+    $('state').textContent = '';
+    let mine = getMine(); if (mine && (!d || mine.day < D.today)) mine = null;
+
+    // live line
+    const live = $('live'), isToday = d && d.day === D.today;
+    live.hidden = !d; live.className = 'live';
+    if (d) {
+      const started = isToday && nowMin >= toMin(d.start);
+      if (isToday && d.chair_busy) { const m = Math.ceil(d.chair_free_in_sec / 60); live.classList.add('busy');
+        $('live-text').innerHTML = `Someone is in the chair now<small>${m > 0 ? `Done in about ${m} minute${m === 1 ? '' : 's'}` : 'Just finishing'}${d.waiting ? ` · ${d.waiting} waiting` : ''}</small>`; }
+      else if (started) { live.classList.add('free'); $('live-text').innerHTML = d.waiting ? `Between sessions<small>${d.waiting} booked and waiting</small>` : `The chair is free right now<small>Come over, or pick a time below</small>`; }
+      else $('live-text').innerHTML = isToday ? `Today from ${d.start} to ${d.end}<small>Pick a time below</small>` : `Next session: ${niceDay(d.day)}<small>${d.start} to ${d.end}</small>`;
+    }
+
+    // times
+    const book = $('book'), ask = $('ask'); book.hidden = !d || asking; ask.hidden = !asking;
+    if (d && !asking) {
+      $('book-h').textContent = isToday ? `Today's times` : `Times for ${niceDay(d.day)}`;
+      const taken = new Set(d.taken), cells = [];
+      for (let m = toMin(d.start); m + v.session_min <= toMin(d.end); m += v.slot_min) {
+        if (isToday && m + v.session_min < nowMin) continue;
+        const t = hm(m), b = document.createElement('button'), isMine = mine && mine.day === d.day && mine.time === t;
+        b.innerHTML = `${t}<small>${isMine ? 'yours' : taken.has(t) ? 'taken' : 'free'}</small>`;
+        if (isMine) { b.className = 'mine'; b.disabled = true; } else if (taken.has(t)) b.disabled = true; else b.onclick = () => { picked = t; asking = true; $('ask-msg').textContent = ''; render(); setTimeout(() => $('ini').focus(), 50); };
+        cells.push(b);
+      }
+      $('slots').replaceChildren(...cells);
+      const free = cells.filter(b => !b.disabled).length;
+      $('book-note').textContent = !cells.length ? 'No times left today.' : free ? `${free} free. Tap a time to put your initials on it.` : 'Every time is taken. Gaps do open up, so check back, or ask at the chair.';
+    }
+    if (asking) $('ask-h').textContent = `${picked}${isToday ? ' today' : ' on ' + niceDay(d.day)}`;
+    const y = $('yours'); y.hidden = !mine;
+    if (mine) y.innerHTML = `You're on the list for ${mine.time}${mine.day === D.today ? ' today' : ' on ' + niceDay(mine.day)}<small>Come to the chair a couple of minutes before.${price ? ` ${price}, paid at the chair.` : ''} Can't make it? Tell Kenn or the venue so someone else can have the time.</small>`;
+
+    const later = (D.upcoming || []).filter(u => !d || u.day !== d.day);
+    $('later').hidden = !later.length;
+    $('later-list').replaceChildren(...later.map(u => { const li = document.createElement('li'); li.innerHTML = `<b>${niceDay(u.day)}</b> ${u.start} to ${u.end}`; return li; }));
+    if (!d && !later.length) $('state').textContent = 'No session days are set just now. Check back soon.';
+  }
+
+  const why = { taken: 'That time has just been taken. Pick another.', past: 'That time has passed. Pick a later one.', initials: 'Type one to three letters.', limit: 'Those initials already have two times today.', day: 'That day is no longer open. Refresh the page.', time: 'That time is not available. Pick another.', venue: 'This link is not in use.' };
+  $('ask-go').onclick = async () => {
+    const ini = $('ini').value.toUpperCase().replace(/[^A-Z]/g, '').slice(0, 3); if (!ini) { $('ask-msg').textContent = why.initials; return; }
+    $('ask-go').disabled = true; $('ask-msg').textContent = 'Saving…';
+    try { const r = await join(D.day.day, picked, ini);
+      if (r.ok) { setMine({ day: r.day, time: r.time }); asking = false; $('ini').value = ''; await refresh(); window.scrollTo({ top: 0, behavior: 'smooth' }); }
+      else { $('ask-msg').textContent = why[r.why] || 'Could not save. Try again.'; if (r.why === 'taken' || r.why === 'past' || r.why === 'time' || r.why === 'day') { await refresh(); setTimeout(() => { asking = false; render(); }, 1500); } }
+    } catch (_) { $('ask-msg').textContent = 'No connection. Try again in a moment.'; }
+    finally { $('ask-go').disabled = false; }
+  };
+  $('ask-back').onclick = () => { asking = false; render(); };
+  $('ini').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); $('ask-go').click(); } });
+
+  let busy = false;
+  async function refresh() {
+    if (busy) return; busy = true;
+    try { D = await load(); lastOk = Date.now(); render(); }
+    catch (_) { if (!D) $('state').textContent = 'Could not load the list. Check your connection; this page retries by itself.'; else if (Date.now() - lastOk > 45000) { $('live').hidden = true; $('state').textContent = 'Connection lost. The times shown may be out of date.'; } }
+    finally { busy = false; }
+  }
+  if (!slug && !DEMO) { $('h').textContent = 'This link is incomplete'; $('state').textContent = 'Ask the venue for the full KnuckleDown link.'; }
+  else { refresh(); setInterval(() => { if (!document.hidden) refresh(); }, 10000); document.addEventListener('visibilitychange', () => { if (!document.hidden) refresh(); }); }
+})();
+</script>
+</body>
+</html>
