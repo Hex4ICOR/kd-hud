@@ -93,6 +93,11 @@
   dialog h2 { font-size: clamp(22px, 4vw, 34px); margin-bottom: 6px; }
   dialog p { color: var(--muted); margin-bottom: 16px; }
   dialog .actions button { flex: 1 1 45%; }
+  dialog .actions button.wide { flex: 1 1 100%; }
+  .sw { background: var(--bg); border: 2px solid #4A443F; color: var(--ink); text-align: left; display: grid; grid-template-columns: auto 1fr; column-gap: 12px; align-items: center; }
+  .sw small { grid-column: 2; font-size: .62em; font-weight: 700; color: var(--muted); }
+  .sw-dot { width: 18px; height: 18px; border-radius: 50%; border: 2px solid var(--muted); grid-row: span 2; }
+  .sw.on { background: #24382A; border-color: var(--ok); color: #DDF3DE; } .sw.on .sw-dot { background: var(--ok); border-color: var(--ok); } .sw.on small { color: #B7DDB9; }
 
   /* full-screen layers */
   .layer { position: fixed; inset: 0; z-index: 10; background: var(--bg); display: none; flex-direction: column;
@@ -416,22 +421,31 @@
   }
 
   // ---- person options -------------------------------------------------------
+  // Every button keeps its place. Screened and Paid are switches (green when on) and leave the menu open;
+  // anything that does not apply right now is greyed out instead of disappearing.
+  let personId = null;
   function person(slot) {
-    if (!slot) return; const v = venue(), q = queue(), acts = [], dlg = $('dlg');
-    const b = (label, fn, primary) => acts.push({ label, fn, primary });
+    if (!slot) return; personId = slot.id; renderPerson(); const dlg = $('dlg'); if (!dlg.open) dlg.showModal();
+  }
+  function renderPerson() {
+    const slot = S.slots.find(x => x.id === personId), v = venue(), dlg = $('dlg'); if (!slot || !v || slot.status === 'cancelled') { if (dlg.open) dlg.close(); return; }
+    const st = slot.status, charge = v.price_pence > 0, close = fn => () => { dlg.close(); fn(); };
     $('dlg-title').textContent = `${slot.initials} · ${T(slot.slot_time)}`;
-    $('dlg-text').textContent = { waiting: 'Waiting.', now: 'In the chair now.', done: 'Done.', noshow: 'Marked as no-show.' }[slot.status] || '';
-    if (slot.status === 'waiting') b(`Start ${v.session_min} min`, () => start(slot), true);
-    if (slot.status === 'now') b('Finish', () => finish(slot), true);
-    if (v.form_url && !slot.screened) b('Wellbeing form', () => openForm(slot, null));
-    b(slot.screened ? 'Clear screened' : 'Mark screened (paper)', () => upd(slot.id, { screened: !slot.screened }));
-    if (v.price_pence > 0) { if (v.pay_url && !slot.paid) b('Show pay code', () => kiosk('pay', slot)); b(slot.paid ? 'Clear paid' : 'Mark paid', () => upd(slot.id, { paid: !slot.paid })); }
-    if (slot.status === 'waiting') b('No-show', () => upd(slot.id, { status: 'noshow' }));
-    if (slot.status === 'done' || slot.status === 'noshow' || slot.status === 'now') b('Back to waiting', () => upd(slot.id, { status: 'waiting', started_at: null, ended_at: null }));
-    if (slot.status !== 'now') b('Remove from list', () => upd(slot.id, { status: 'cancelled' }));
-    b('Close', () => {});
-    const box = $('dlg-actions'); box.replaceChildren(...acts.map(a => { const el = document.createElement('button'); el.textContent = a.label; el.className = a.primary ? 'b-primary' : 'b-ghost'; el.onclick = () => { dlg.close(); a.fn(); }; return el; }));
-    if (!dlg.open) dlg.showModal();
+    $('dlg-text').textContent = { waiting: 'Waiting.', now: 'In the chair now.', done: 'Done.', noshow: 'Marked as no-show.' }[st] || '';
+    const mk = (label, cls, fn, off) => { const el = document.createElement('button'); el.innerHTML = label; el.className = cls; el.disabled = !!off; el.onclick = fn; return el; };
+    const sw = (label, on, fn, off) => mk(`<span class="sw-dot"></span>${label}<small>${off ? 'not needed' : on ? 'yes · tap to undo' : 'no · tap to tick'}</small>`, 'sw' + (on ? ' on' : ''), fn, off);
+    const main = st === 'now' ? mk('Finish', 'b-primary wide', close(() => finish(slot)))
+      : st === 'waiting' ? mk(`Start ${v.session_min} min`, 'b-primary wide', close(() => start(slot)))
+      : mk('Back to waiting', 'b-primary wide', close(() => upd(slot.id, { status: 'waiting', started_at: null, ended_at: null })));
+    $('dlg-actions').replaceChildren(
+      main,
+      sw('Screened', slot.screened, () => { upd(slot.id, { screened: !slot.screened }); renderPerson(); }),
+      sw('Paid', slot.paid, () => { upd(slot.id, { paid: !slot.paid }); renderPerson(); }, !charge),
+      mk('Open wellbeing form', 'b-ghost', close(() => openForm(slot, null)), !v.form_url),
+      mk('Show pay code', 'b-ghost', close(() => kiosk('pay', slot)), !charge || !v.pay_url),
+      mk('No-show', 'b-ghost', close(() => upd(slot.id, { status: 'noshow' })), st !== 'waiting'),
+      mk('Remove from list', 'b-ghost', close(() => upd(slot.id, { status: 'cancelled' })), st === 'now'),
+      mk('Close', 'b-small wide', () => dlg.close()));
   }
   let addTime = null;
   function askAdd(time) { addTime = time; $('add-title').textContent = `Add to ${time}`; $('add-ini').value = ''; $('add-msg').textContent = ''; $('add').showModal(); setTimeout(() => $('add-ini').focus(), 50); }
