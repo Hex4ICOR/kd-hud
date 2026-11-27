@@ -49,6 +49,13 @@
   .msg { color: var(--warn); font-weight: 700; min-height: 1.3em; font-size: 14px; }
   .yours { background: #24382A; color: #DDF3DE; border-radius: 16px; padding: 16px 18px; font-weight: 800; }
   .yours small { display: block; font-weight: 600; opacity: .85; }
+  .booked { background: var(--panel); border-radius: 16px; padding: 18px; display: grid; gap: 12px; }
+  .booked .tag { color: var(--next-ink); font-weight: 800; font-size: 15px; letter-spacing: .04em; }
+  .booked .big { font-weight: 900; font-size: clamp(44px, 14vw, 64px); line-height: 1; font-variant-numeric: tabular-nums; color: var(--ink); }
+  .booked ol { margin: 0; padding-left: 22px; color: var(--ink); display: grid; gap: 6px; font-weight: 600; }
+  a.pay { display: block; text-align: center; text-decoration: none; background: var(--now); color: #fff; font-weight: 800; font-size: 18px; border-radius: 12px; padding: 16px; }
+  a.pay:focus-visible { outline: 3px solid var(--next-ink); outline-offset: 2px; }
+  .booked .or { text-align: center; font-size: 15px; }
   ul { list-style: none; display: grid; gap: 6px; color: var(--muted); font-weight: 600; }
   ul b { color: var(--ink); }
   footer { color: var(--done); font-size: 13px; text-align: center; margin-top: 8px; }
@@ -63,6 +70,19 @@
   <div class="facts" id="facts"></div>
   <div class="live" id="live" hidden><span class="dot"></span><span id="live-text"></span></div>
   <div class="yours" id="yours" hidden></div>
+  <section class="booked" id="booked" hidden aria-live="polite">
+    <div class="tag" id="bk-tag"></div>
+    <div><h2>You're in at</h2><div class="big" id="bk-time"></div><p id="bk-day"></p></div>
+    <ol>
+      <li>Head to the chair about 5 minutes before your time.</li>
+      <li>Kenn does a quick wellbeing form with you on his iPad.</li>
+      <li>Sit down for your 15 minutes.</li>
+    </ol>
+    <a class="pay" id="bk-pay" href="#" target="_blank" rel="noopener" hidden></a>
+    <p class="or" id="bk-or"></p>
+    <button class="ghost" id="bk-ics" type="button">Add to calendar</button>
+    <p id="bk-cancel">Can't make it? Tell Kenn or the venue so someone else can have the time.</p>
+  </section>
   <section class="box" id="book" hidden>
     <h2 id="book-h"></h2>
     <div class="slots" id="slots"></div>
@@ -104,7 +124,7 @@
   const demo = (() => { const d = new Date(), fmt = new Intl.DateTimeFormat('en-GB', { timeZone: KD.tz, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' });
     const p = {}; fmt.formatToParts(d).forEach(x => p[x.type] = x.value); const today = `${p.year}-${p.month}-${p.day}`, min = +p.hour * 60 + +p.minute, start = Math.max(0, Math.floor((min - 40) / 20) * 20);
     const taken = [hm(start), hm(start + 20), hm(start + 40), hm(start + 80)];
-    return { load: async () => ({ found: true, today, now: `${p.hour}:${p.minute}:00`, venue: { name: 'Demo venue', blurb: 'A 15-minute seated acupressure massage for shoulders, arms and hands. Fully clothed, no oils, no changing.', where: 'Look for the KnuckleDown chair by reception.', price_pence: 1500, session_min: 15, slot_min: 20 },
+    return { load: async () => ({ found: true, today, now: `${p.hour}:${p.minute}:00`, venue: { name: 'Demo venue', blurb: 'A 15-minute seated acupressure massage for shoulders, arms and hands. Fully clothed, no oils, no changing.', where: 'Look for the KnuckleDown chair by reception.', price_pence: 1500, pay_url: 'https://example.com/pay', session_min: 15, slot_min: 20 },
         day: { day: today, start: hm(start), end: hm(Math.min(start + 240, 1439)), taken: taken.slice(), waiting: 2, chair_busy: true, chair_free_in_sec: 7 * 60 }, upcoming: [{ day: today, start: hm(start), end: hm(Math.min(start + 240, 1439)) }] }),
       join: async (day, time) => taken.includes(time) ? { ok: false, why: 'taken' } : (taken.push(time), { ok: true, time, day }) }; })();
   const load = () => DEMO ? demo.load() : rpc('sess_public', { p_slug: slug });
@@ -119,7 +139,7 @@
     document.title = `KnuckleDown at ${v.name}`;
     $('h').textContent = `Chair massage at ${v.name}`;
     $('blurb').textContent = v.blurb || '';
-    const facts = [`${v.session_min} minutes`]; if (price) facts.push(price + ', pay on the day by card or phone'); if (v.where) facts.push(v.where);
+    const facts = [`${v.session_min} minutes`]; if (price) facts.push(price + (v.pay_url ? ', pay now or at the chair' : ', pay at the chair by card or phone')); if (v.where) facts.push(v.where);
     $('facts').replaceChildren(...facts.map(f => { const s = document.createElement('span'); s.className = 'fact'; s.textContent = f; return s; }));
     $('state').textContent = '';
     let mine = getMine(); if (mine && (!d || mine.day < D.today)) mine = null;
@@ -152,8 +172,17 @@
       $('book-note').textContent = !cells.length ? 'No times left today.' : free ? `${free} free. Tap a time to put your initials on it.` : 'Every time is taken. Gaps do open up, so check back, or ask at the chair.';
     }
     if (asking) $('ask-h').textContent = `${picked}${isToday ? ' today' : ' on ' + niceDay(d.day)}`;
-    const y = $('yours'); y.hidden = !mine;
-    if (mine) y.innerHTML = `You're on the list for ${mine.time}${mine.day === D.today ? ' today' : ' on ' + niceDay(mine.day)}<small>Come to the chair a couple of minutes before.${price ? ` ${price}, paid at the chair.` : ''} Can't make it? Tell Kenn or the venue so someone else can have the time.</small>`;
+    $('yours').hidden = true; $('booked').hidden = !mine;
+    if (mine) {
+      $('bk-tag').textContent = mine.ini ? `${mine.ini} · on the list` : 'On the list';
+      $('bk-time').textContent = mine.time;
+      $('bk-day').textContent = (mine.day === D.today ? 'Today' : niceDay(mine.day)) + ' at ' + v.name;
+      const pay = $('bk-pay'), payable = price && v.pay_url;
+      pay.hidden = !payable;
+      if (payable) { pay.textContent = `Pay now, save a minute later · ${price}`;
+        pay.href = v.pay_url + (v.pay_url.includes('?') ? '&' : '?') + 'client_reference_id=' + encodeURIComponent([slug, mine.day.replace(/-/g, ''), mine.time.replace(':', ''), mine.ini || ''].filter(Boolean).join('-')); }
+      $('bk-or').textContent = !price ? '' : payable ? 'or pay at the chair. Paid already? Show your payment screen when you sit down.' : `${price}, paid at the chair by card or phone.`;
+    }
 
     const later = (D.upcoming || []).filter(u => !d || u.day !== d.day);
     $('later').hidden = !later.length;
@@ -166,12 +195,24 @@
     const ini = $('ini').value.toUpperCase().replace(/[^A-Z]/g, '').slice(0, 3); if (!ini) { $('ask-msg').textContent = why.initials; return; }
     $('ask-go').disabled = true; $('ask-msg').textContent = 'Saving…';
     try { const r = await join(D.day.day, picked, ini);
-      if (r.ok) { setMine({ day: r.day, time: r.time }); asking = false; $('ini').value = ''; await refresh(); window.scrollTo({ top: 0, behavior: 'smooth' }); }
+      if (r.ok) { setMine({ day: r.day, time: r.time, ini }); asking = false; $('ini').value = ''; await refresh(); window.scrollTo({ top: 0, behavior: 'smooth' }); }
       else { $('ask-msg').textContent = why[r.why] || 'Could not save. Try again.'; if (r.why === 'taken' || r.why === 'past' || r.why === 'time' || r.why === 'day') { await refresh(); setTimeout(() => { asking = false; render(); }, 1500); } }
     } catch (_) { $('ask-msg').textContent = 'No connection. Try again in a moment.'; }
     finally { $('ask-go').disabled = false; }
   };
   $('ask-back').onclick = () => { asking = false; render(); };
+  $('bk-ics').onclick = () => {
+    const m = getMine(); if (!m || !D || !D.venue) return;
+    const d = m.day.replace(/-/g, ''), st = m.time.replace(':', '') + '00', end = hm(toMin(m.time) + (D.venue.session_min || 15)).replace(':', '') + '00';
+    const ics = ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//KnuckleDown//Sessions//EN', 'BEGIN:VEVENT',
+      'UID:' + d + st + '-' + slug + '@knuckledown.app', 'DTSTAMP:' + new Date().toISOString().replace(/[-:]/g, '').slice(0, 15) + 'Z',
+      'DTSTART;TZID=Europe/London:' + d + 'T' + st, 'DTEND;TZID=Europe/London:' + d + 'T' + end,
+      'SUMMARY:KnuckleDown chair massage', 'LOCATION:' + D.venue.name.replace(/[,;]/g, ' '),
+      'DESCRIPTION:Head to the chair about 5 minutes early for a quick wellbeing form.',
+      'BEGIN:VALARM', 'TRIGGER:-PT15M', 'ACTION:DISPLAY', 'DESCRIPTION:KnuckleDown in 15 minutes', 'END:VALARM', 'END:VEVENT', 'END:VCALENDAR'].join('\r\n');
+    const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([ics], { type: 'text/calendar' }));
+    a.download = 'knuckledown-' + d + '-' + st.slice(0, 4) + '.ics'; document.body.appendChild(a); a.click(); a.remove();
+  };
   $('ini').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); $('ask-go').click(); } });
 
   let busy = false;
